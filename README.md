@@ -20,7 +20,7 @@ The mission of NanCy SSIL is to transform OpenClaw from a high-risk experimental
 
 The fundamental innovation of NanCy SSIL revolves around a single, unbreakable loop: **Intent Anchoring.**
 
-Before any autonomous session begins, the system captures and "locks" the user’s explicit intent. This intent serves as the immutable Source of Truth for the entire session.
+Before any autonomous session begins, the system captures, confirms and "locks" the user’s explicit intent. This intent serves as the immutable Source of Truth for the entire session.
 
 While the primary Agent (OpenClaw) may be susceptible to "intent drift," hallucinations, or prompt injection, NanCy acts as an **external, stateless observer.** It cross-references every critical action—such as submitting a purchase form or sending an outgoing email—against the anchored intent. If the action does not perfectly align with the original goal, NanCy pulls the plug. All other security features in this framework are built to support and enforce this verification process.
 
@@ -37,11 +37,11 @@ NanCy doesn't just watch; it communicates. Before execution, NanCy analyzes the 
 
 ### 3. Domain Border Control
 
-NanCy implements a strict Zero-Trust policy for web navigation. It verifies domains against whitelists and intercepts traffic before the agent even reaches a site. Unsafe domains trigger an immediate process kill or a "Access Denied" sandboxed view.
+NanCy implements a strict Zero-Trust policy for web navigation. It verifies domains against free APIs (or optional whitelists) and intercepts traffic before the agent even reaches a site. Unsafe domains trigger an immediate process kill or a "Access Denied" sandboxed view.
 
 ### 4. Contextual Scrambler
 
-To prevent indirect prompt injections, NanCy "scrambles" the syntax of incoming data. This destroys malicious command structures while preserving the semantic meaning for the agent to process safely.
+To prevent indirect prompt injections, NanCy "scrambles" the syntax of incoming data in certain situations. This destroys a possible prompt injection while still allowing NanCy to detect it.
 
 ### 5. DOM Biopsy
 
@@ -53,7 +53,7 @@ To prevent "Self-Poisoning," the agent is strictly forbidden from writing to or 
 
 ### 7. Thought Verification
 
-NanCy monitors the agent's internal "Chain of Thought." If the agent's internal reasoning starts veering toward unauthorized actions, the session is terminated before the action is ever attempted.
+NanCy monitors the agent's internal "Chain of Thought" from system logs. If the agent's internal reasoning starts veering toward unauthorized actions, the session is terminated before the action is ever attempted.
 
 
 ## The Philosophy: Assume Compromise & Pragmatic Safety
