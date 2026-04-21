@@ -1,5 +1,5 @@
 # NanCy SSIL: Stateless Security Interruption Layer
-## Making Autonomous AI Agents Production-Ready
+## A Fail-Safe Layer for AI Agents
 ![](https://github.com/fxg55647/NanCy/blob/main/images/nancy.png)
 ## Overview
 
@@ -70,8 +70,8 @@ Our goal is not to achieve "unbreakable" absolute security—as such a thing rar
 
 In the NanCy SSIL framework, it is perfectly acceptable—and often encouraged—for the agent to fail.
 
-- It is okay for the agent to report: *"I have stopped the operation because I could not verify the safety of this action."* \* It is okay for the agent to ask: *"I am unsure if this intent matches your goal. Please intervene."*
+- It is okay for the agent to occasionally report: *"I have stopped the operation because I could not verify the safety of this action."* \* It is okay for the agent to occasionally ask: *"I am unsure if this intent matches your goal. Please intervene."*
 
-**A failed task is a minor inconvenience; an unauthorized credit card drain is a catastrophe.** NanCy SSIL ensures that when the system fails, it fails safely (Fail-Safe).
+**A failed task is a minor inconvenience; an unauthorized credit card drain is a catastrophe.** NanCy SSIL ensures that when the system fails, it fails safely.
 
 
