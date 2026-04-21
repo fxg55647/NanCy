@@ -1,6 +1,6 @@
 # NanCy SSIL: Stateless Security Interruption Layer
 ## Making Autonomous AI Agents Production-Ready
-
+![](https://pandao.github.io/editor.md/images/logos/editormd-logo-180x180.png)
 ## Overview
 
 NanCy SSIL (Stateless Security Interruption Layer) is a specialized security framework designed as a plugin for the OpenClaw autonomous agent. While autonomous agents show immense potential, their adoption in real-world commercial environments is currently hindered by the lack of deterministic safety boundaries.
