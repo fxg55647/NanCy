@@ -1,0 +1,13 @@
+{
+  "id": "nancy",
+  "name": "NanCy",
+  "description": "SSIL – Stateless Security Intent Layer",
+  "activation": {
+    "onCapabilities": ["hook"]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
