@@ -1,5 +1,5 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
-import { appendFileSync } from "fs";
+import { appendFileSync, readFileSync } from "fs";
 import { join } from "path";
 
 export default definePluginEntry({
@@ -41,10 +41,21 @@ export default definePluginEntry({
 
       appendFileSync(logFile, JSON.stringify(entry) + "\n");
 
+      let currentTask: unknown = null;
+      try {
+        const taskPath = join(api.rootDir ?? ".", "..", "workspace", "tasks", "current.json");
+        currentTask = JSON.parse(readFileSync(taskPath, "utf8"));
+      } catch {
+        // no current task on file
+      }
+
       const sessionKey = `agent:nancy:analysis:${Date.now()}`;
+      const taskContext = currentTask
+        ? `Current confirmed task: ${JSON.stringify(currentTask)}. `
+        : "";
       api.runtime.subagent.run({
         sessionKey,
-        message: `You are a stateless security observer for an AI agent. You have no memory of previous calls. Briefly describe what is happening in this tool call and whether it seems safe or suspicious. Tool call: ${JSON.stringify(event.params)}`,
+        message: `You are a stateless security observer for an AI agent. You have no memory of previous calls. ${taskContext}Briefly describe what is happening in this tool call, whether it matches the confirmed task, and whether it seems safe or suspicious. Tool call: ${JSON.stringify(event.params)}`,
         deliver: false,
       }).catch((err: unknown) => {
         appendFileSync(analysisLog, JSON.stringify({ ts, toolName: event.toolName, error: String(err) }) + "\n");
