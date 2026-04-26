@@ -123,6 +123,19 @@ export default definePluginEntry({
       appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "llm_output", sessionKey: ctx.sessionKey, provider: event.provider, model: event.model, texts: event.assistantTexts }) + "\n");
     });
 
+    api.on("message_sending", (event, ctx) => {
+      const ts = new Date().toISOString();
+      const text = String((event as Record<string, unknown>).text ?? "");
+      if (!text) return;
+      if (text.startsWith("Reasoning:")) {
+        console.log(`[nancy] reasoning: ${text.slice(10, 120).trim()}…`);
+        appendFileSync(analysisLog, JSON.stringify({ ts, event: "reasoning", text }) + "\n");
+      } else {
+        console.log(`[nancy] outbound: ${text.slice(0, 100).trim()}${text.length > 100 ? "…" : ""}`);
+      }
+      appendFileSync(logFile, JSON.stringify({ ts, event: "message_sending", channel: ctx.channel ?? "unknown", text }) + "\n");
+    });
+
     api.on("message_received", (event, ctx) => {
       const ts = new Date().toISOString();
       const channel = ctx.channel ?? "unknown";
