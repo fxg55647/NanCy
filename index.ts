@@ -86,16 +86,26 @@ export default definePluginEntry({
       appendFileSync(logFile, JSON.stringify({ ts, event: "message_received", channel, from, isGroup: !!(event as Record<string, unknown>).isGroup, bodyLen: body.length }) + "\n");
     });
 
-    const HIGH_RISK_TOOLS = new Set([
-      "web_fetch", "web_form_submit", "web_search",
-      "shell", "run_command", "bash", "write_file",
+    const ALWAYS_ANALYZE = new Set([
+      "web_fetch", "web_form_submit", "web_search", "write", "write_file",
     ]);
+    const ANALYZE_IF_RISKY = new Set(["exec", "shell", "bash", "run_command"]);
+    const SAFE_EXEC = /^(ls|pwd|mkdir|echo|cat|head|tail|whoami|date|cd|cp|mv)\b/;
+
+    function shouldAnalyze(toolName: string, params: unknown): boolean {
+      if (ALWAYS_ANALYZE.has(toolName)) return true;
+      if (ANALYZE_IF_RISKY.has(toolName)) {
+        const cmd = String((params as Record<string, unknown>)?.command ?? "");
+        return !SAFE_EXEC.test(cmd.trim());
+      }
+      return false;
+    }
 
     api.on("before_tool_call", async (event, ctx) => {
       const ts = new Date().toISOString();
       appendFileSync(logFile, JSON.stringify({ ts, event: "before_tool_call", sessionKey: ctx.sessionKey, runId: ctx.runId, toolName: event.toolName, params: event.params }) + "\n");
 
-      if (!HIGH_RISK_TOOLS.has(event.toolName)) return;
+      if (!shouldAnalyze(event.toolName, event.params)) return;
 
       const analysisCfg = nancyConfig.analysis;
       if (!analysisCfg) {

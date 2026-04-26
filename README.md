@@ -75,3 +75,81 @@ In the NanCy SSIL framework, it is perfectly acceptableâ€”and often encouragedâ€
 **A failed task is a minor inconvenience; an unauthorized credit card drain is a catastrophe.** NanCy SSIL ensures that when the system fails, it fails safely.
 
 
+## Getting Started
+
+### Prerequisites
+
+- [OpenClaw](https://openclaw.ai) installed and running
+- A supported LLM API key (Google Gemini, OpenAI, Anthropic, or any OpenAI-compatible provider)
+
+### 1. Clone the plugin
+
+```bash
+git clone https://github.com/fxg55647/NanCy.git C:/projects/nancy
+```
+
+### 2. Register the plugin in openclaw.json
+
+Add the plugin path to the `plugins.load.paths` array and enable it under `plugins.entries`:
+
+```json
+{
+  "plugins": {
+    "load": {
+      "paths": ["C:/projects/nancy"]
+    },
+    "entries": {
+      "nancy": {
+        "enabled": true,
+        "config": {
+          "analysis": {
+            "provider": "gemini",
+            "model": "gemini-3-flash-preview",
+            "apiKey": "YOUR_API_KEY_HERE"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+**Supported providers:**
+
+| `provider` | `model` example | `baseUrl` required |
+|---|---|---|
+| `gemini` | `gemini-3-flash-preview` | No |
+| `openai` | `gpt-4.1-mini` | No |
+| `anthropic` | `claude-haiku-4-5-20251001` | No |
+| `openai-compat` | `llama-3.3-70b-versatile` | Yes (e.g. `https://api.groq.com/openai`) |
+
+### 3. Add task confirmation rules to your agent
+
+NanCy works together with agent instructions. Add the following to your workspace `AGENTS.md` to require the agent to confirm before submitting any data externally:
+
+```markdown
+## Task Confirmation
+
+Before any action that sends data to the web, send this message and wait for y/Y/Yes:
+
+"Formal confirmation: [what you are about to do].
+Reply y to proceed, any other reply cancels.
+[RANDOM_8_DIGIT_ID]"
+
+If allowed to proceed:
+1. Create `tasks/` directory if needed
+2. Write `tasks/[ID].json` with id, ts, description, status: "confirmed"
+3. Copy to `tasks/current.json`
+4. Then proceed
+```
+
+### 4. Restart OpenClaw
+
+Nancy starts automatically on the next gateway start. Check that it loaded:
+
+```
+[nancy] inbound telegram ... (direct, N chars)
+```
+
+Analysis results are written to `nancy-analysis.log` in the plugin directory.
+
