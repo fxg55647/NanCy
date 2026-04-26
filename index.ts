@@ -1,6 +1,11 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
-import { appendFileSync, readFileSync, readdirSync, statSync } from "fs";
+import { appendFileSync, readFileSync, readdirSync, statSync, accessSync, constants } from "fs";
 import { join } from "path";
+
+function isWritable(filePath: string): boolean {
+  try { accessSync(filePath, constants.W_OK); return true; }
+  catch { return false; }
+}
 
 interface AnalysisConfig {
   provider: "gemini" | "openai" | "openai-compat" | "anthropic";
@@ -67,6 +72,24 @@ export default definePluginEntry({
 
     api.on("gateway_start", (_event, _ctx) => {
       appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "nancy_started" }) + "\n");
+
+      const workspaceDir = api.runtime.agent.resolveAgentWorkspaceDir(api.config);
+      const PROTECTED_FILES = [
+        { label: "AGENTS.md", path: join(workspaceDir, "AGENTS.md") },
+        { label: "IDENTITY.md", path: join(workspaceDir, "IDENTITY.md") },
+        { label: "MEMORY.md", path: join(workspaceDir, "MEMORY.md") },
+        { label: "nancy/index.ts", path: join(api.rootDir ?? ".", "index.ts") },
+        { label: "nancy/openclaw.plugin.json", path: join(api.rootDir ?? ".", "openclaw.plugin.json") },
+      ];
+
+      const writable = PROTECTED_FILES.filter(f => isWritable(f.path));
+      if (writable.length > 0) {
+        const names = writable.map(f => f.label).join(", ");
+        console.warn(`[nancy] ⚠️  SECURITY WARNING: these files are writable and unprotected: ${names}`);
+        appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "security_warning", writableFiles: writable.map(f => f.label) }) + "\n");
+      } else {
+        console.log("[nancy] ✓ Protected files are read-only");
+      }
     });
 
     api.on("session_start", (event, ctx) => {
