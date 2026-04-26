@@ -8,6 +8,32 @@
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
-    "properties": {}
+    "properties": {
+      "analysis": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Direct LLM used for tool call security analysis",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": ["gemini", "openai", "openai-compat", "anthropic"],
+            "description": "LLM provider. Use openai-compat for any OpenAI-compatible endpoint."
+          },
+          "model": {
+            "type": "string",
+            "description": "Model name, e.g. gemini-2.0-flash-lite or gpt-4.1-mini"
+          },
+          "apiKey": {
+            "type": "string",
+            "description": "API key for the provider"
+          },
+          "baseUrl": {
+            "type": "string",
+            "description": "Base URL for openai-compat providers (e.g. https://api.groq.com/openai)"
+          }
+        },
+        "required": ["provider", "model", "apiKey"]
+      }
+    }
   }
 }
