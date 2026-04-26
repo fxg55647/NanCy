@@ -7,6 +7,14 @@ function isWritable(filePath: string): boolean {
   catch { return false; }
 }
 
+async function telegramAlert(botToken: string, chatId: string, text: string): Promise<void> {
+  await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "Markdown" }),
+  });
+}
+
 interface AnalysisConfig {
   provider: "gemini" | "openai" | "openai-compat" | "anthropic";
   model: string;
@@ -89,6 +97,21 @@ export default definePluginEntry({
         appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "security_warning", writableFiles: writable.map(f => f.label) }) + "\n");
       } else {
         console.log("[nancy] ✓ Protected files are read-only");
+      }
+
+      const cfg = api.config as Record<string, unknown>;
+      const telegram = (cfg?.channels as Record<string, unknown>)?.telegram as Record<string, unknown> | undefined;
+      const botToken = telegram?.botToken as string | undefined;
+      const chatId = (telegram?.allowFrom as string[] | undefined)?.[0];
+
+      if (botToken && chatId) {
+        const statusLine = writable.length > 0
+          ? `⚠️ *SECURITY WARNING*: unprotected files: ${writable.map(f => f.label).join(", ")}`
+          : `✅ Protected files are read-only`;
+        const analysisStatus = nancyConfig.analysis
+          ? `✅ Analysis: ${nancyConfig.analysis.provider}/${nancyConfig.analysis.model}`
+          : `⚠️ Analysis: not configured`;
+        telegramAlert(botToken, chatId, `🛡 *NanCy online*\n${statusLine}\n${analysisStatus}`).catch(() => {});
       }
     });
 
