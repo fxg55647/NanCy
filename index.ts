@@ -62,6 +62,7 @@ export default definePluginEntry({
   register(api) {
     const logFile = join(api.rootDir ?? ".", "nancy.log");
     const analysisLog = join(api.rootDir ?? ".", "nancy-analysis.log");
+    // api.pluginConfig holds plugins.entries.nancy.config — distinct from api.config (full openclaw config)
     const nancyConfig = api.pluginConfig as NancyConfig;
 
     api.on("gateway_start", (_event, _ctx) => {
@@ -90,6 +91,7 @@ export default definePluginEntry({
       "web_fetch", "web_form_submit", "web_search", "write", "write_file",
     ]);
     const ANALYZE_IF_RISKY = new Set(["exec", "shell", "bash", "run_command"]);
+    // Skip read-only and harmless shell commands to avoid adding Gemini latency with no security value
     const SAFE_EXEC = /^(ls|pwd|mkdir|echo|cat|head|tail|whoami|date|cd|cp|mv)\b/;
 
     function shouldAnalyze(toolName: string, params: unknown): boolean {
@@ -119,6 +121,8 @@ export default definePluginEntry({
         const tasksDir = join(workspaceDir, "tasks");
         let taskFile: string | null = null;
         try {
+          // AGENTS.md requires the agent to write current.json (step 3), but it sometimes skips it —
+          // fall back to the newest ID file in that case
           readFileSync(join(tasksDir, "current.json"));
           taskFile = join(tasksDir, "current.json");
         } catch {
@@ -134,6 +138,7 @@ export default definePluginEntry({
       const taskContext = currentTask ? `Current confirmed task: ${JSON.stringify(currentTask)}. ` : "";
       const prompt = `You are a stateless security observer for an AI agent. You have no memory of previous calls. ${taskContext}Briefly describe what is happening in this tool call and whether it seems safe or suspicious. Tool call: ${JSON.stringify(event.params)}`;
 
+      // Awaiting here is intentional — before_tool_call blocks until analysis completes
       try {
         const analysis = await callLlm(analysisCfg, prompt);
         appendFileSync(analysisLog, JSON.stringify({ ts, toolName: event.toolName, analysis }) + "\n");
