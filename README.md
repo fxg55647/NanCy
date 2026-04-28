@@ -129,22 +129,37 @@ Add the plugin path to the `plugins.load.paths` array and enable it under `plugi
 
 ### 3. Add task confirmation rules to your agent
 
-NanCy works together with agent instructions. Add the following to your workspace `AGENTS.md` to require the agent to confirm before submitting any data externally:
+NanCy works together with agent instructions. Add the following to your workspace `AGENTS.md` to require the agent to confirm before any web activity:
 
 ```markdown
-## Task Confirmation
+## Task Confirmation *(main agent only — subagents skip this section)*
 
-Before any action that sends data to the web, send this message and wait for y/Y/Yes:
+Before starting any task that involves sending data to the web follow the next critical order:
 
-"Formal confirmation: [what you are about to do].
+**CRITICAL: Send the confirmation message as described below immediately and stop. Do not browse, do not fetch, do not call any tools, and do not prepare anything first. Wait for the reply. Only resume when the user replies with y or Y or Yes or yes.**
+
+The confirmation message format ([ID_NUMBER] is a random 8 digit number you generate):
+
+"Formal confirmation: [what you are about to do, including what data will be sent and where].
 Reply y to proceed, any other reply cancels.
-[RANDOM_8_DIGIT_ID]"
+[ID_NUMBER]"
 
-If allowed to proceed:
-1. Create `tasks/` directory if needed
-2. Write `tasks/[ID].json` with id, ts, description, status: "confirmed"
-3. Copy to `tasks/current.json`
-4. Then proceed
+If you are allowed to proceed:
+1. Create the directory `tasks/` in the workspace if it does not exist
+2. Write a file named `tasks/[ID_NUMBER].json` with this exact structure:
+   ```json
+   {
+     "id": "[ID_NUMBER]",
+     "ts": "[current ISO timestamp]",
+     "description": "[what you are about to do]",
+     "status": "confirmed",
+     "openclaw_task_id": null
+   }
+   ```
+3. Copy that file to `tasks/current.json` (overwrite if it exists)
+4. Then proceed with the task
+
+IMPORTANT: Every single attempt requires a fresh confirmation and a new ID file. If a task fails or is interrupted for any reason, the previous confirmation is void. You must request a new confirmation and generate a new ID file before trying again, even if the task is identical to the previous one.
 ```
 
 ### 4. Restart OpenClaw

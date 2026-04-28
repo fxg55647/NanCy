@@ -64,7 +64,7 @@ function snapshotFilename(params: unknown): string {
       if ([...parsed.searchParams].length >= 3) suffix = "_submit";
     }
   } catch { }
-  return `${datePart}_${timePart}_${identifier}${suffix}.txt`;
+  return `${timePart}_${datePart}_${identifier}${suffix}.txt`;
 }
 
 async function callLlm(cfg: AnalysisConfig, prompt: string): Promise<string | null> {
