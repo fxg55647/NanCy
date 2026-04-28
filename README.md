@@ -81,8 +81,8 @@ In the NanCy SSIL framework, it is perfectly acceptable—and often encouraged�
 
 ## Getting Started
 
-[!NOTE]
-I want the readers to read it carefully as it contains many important docs.
+> [!WARNING]
+> Tämä on varoitus.
 
 ### Prerequisites
 
