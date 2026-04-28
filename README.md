@@ -81,6 +81,9 @@ In the NanCy SSIL framework, it is perfectly acceptableâ€”and often encouragedâ€
 
 ## Getting Started
 
+[!NOTE]
+I want the readers to read it carefully as it contains many important docs.
+
 ### Prerequisites
 
 - [OpenClaw](https://openclaw.ai) installed and running
