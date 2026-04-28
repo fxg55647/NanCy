@@ -50,10 +50,10 @@ function snapshotFilename(params: unknown): string {
   const HH = String(now.getHours()).padStart(2, "0");
   const MM = String(now.getMinutes()).padStart(2, "0");
   const SS = String(now.getSeconds()).padStart(2, "0");
-  const ms = String(now.getMilliseconds()).padStart(3, "0");
   const datePart = `${dd}-${mm}-${yyyy}`;
-  const timePart = `${HH}-${MM}-${SS}-${ms}`;
+  const timePart = `${HH}-${MM}-${SS}`;
   let identifier = "browser";
+  let suffix = "_fetch";
   try {
     const url = String((params as Record<string, unknown>)?.url ?? "");
     if (url) {
@@ -61,9 +61,10 @@ function snapshotFilename(params: unknown): string {
       const hostname = parsed.hostname.replace(/[^a-z0-9.-]/gi, "-");
       const path = parsed.pathname.replace(/[^a-z0-9]/gi, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 30);
       identifier = path ? `${hostname}_${path}` : hostname;
+      if ([...parsed.searchParams].length >= 3) suffix = "_submit";
     }
   } catch { }
-  return `${datePart}_${timePart}_${identifier}.txt`;
+  return `${datePart}_${timePart}_${identifier}${suffix}.txt`;
 }
 
 async function callLlm(cfg: AnalysisConfig, prompt: string): Promise<string | null> {
