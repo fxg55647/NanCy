@@ -41,13 +41,13 @@ NanCy implements a strict Zero-Trust policy for web navigation. It verifies doma
 
 ### 4. Contextual Scrambler
 
-To prevent indirect prompt injections, NanCy "scrambles" the syntax of incoming data in certain situations. This destroys a possible prompt injection while still allowing NanCy to detect it.
+To prevent indirect prompt injections, NanCy "scrambles" the syntax of incoming data in certain situations. This blunts a possible prompt injection while still allowing NanCy to detect it.
 
 This feature is powered by **[PIDD (Prompt Injection Disarming & Detection)](https://github.com/fxg55647/PIDD)** — a standalone library that splits untrusted input into character-based chunks with randomized boundaries, shuffles the words within each segment, and passes the result to a dedicated evaluation model. The evaluator returns `go`, `no`, or `clarify` without ever following the content it analyzes. PIDD can be used independently of NanCy in any LLM pipeline.
 
 ### 5. DOM Biopsy
 
-Before any interaction with a web element (clicks, form submits), NanCy performs a "biopsy" of the underlying HTML code to ensure the element’s true function matches the agent's reported intent.
+Before any interaction with a web element (for example form submits), NanCy performs a "biopsy" of the underlying HTML code to ensure the element’s true function matches the agent's reported intent.
 
 ### 6. Write-Protection for Core Configuration
 
@@ -55,18 +55,18 @@ To prevent "Self-Poisoning," the agent is strictly forbidden from writing to or 
 
 ### 7. Thought Verification
 
-NanCy monitors the agent's internal "Chain of Thought" from system logs. If the agent's internal reasoning starts veering toward unauthorized actions, the session is terminated before the action is ever attempted.
+NanCy monitors the agent's internal "Chain of Thought" from system logs (if supported by selected LLM). If the agent's internal reasoning starts veering toward unauthorized actions, the session is terminated before the action is ever attempted.
 
 
 ## The Philosophy: Assume Compromise & Pragmatic Safety
 
-We operate on the principle that the agent is perpetually at risk of being confused or poisoned. We don't try to make the AI "perfect"; we make the environment **safe**.
+We operate on the principle that the agent is perpetually at risk of being confused or poisoned. We don't try to make the AI "perfect"; we make the environment **safe enough for profitable use** in many business cases.
 
 **If the agent cannot be trusted, the supervision must be.**
 
 ### **Pragmatism over Perfection**
 
-Our goal is not to achieve "unbreakable" absolute security—as such a thing rarely exists—but to provide a **massive improvement** over the current state of autonomous AI. We are building a system that makes the commercial use of agents **rational and manageable.**
+Our goal is not to achieve "unbreakable" absolute security—as such a thing rarely exists—but to provide a **significant improvement** over the current state of autonomous AI, especially OpenClaw. We are building a system that makes the commercial use of agents **rational, profitable and manageable.**
 
 ### **Safe Failure: The Right to Give Up**
 
@@ -98,7 +98,7 @@ Add the plugin path to the `plugins.load.paths` array and enable it under `plugi
 {
   "plugins": {
     "load": {
-      "paths": ["C:/projects/nancy"]
+      "paths": ["C:/nancy"]
     },
     "entries": {
       "nancy": {
