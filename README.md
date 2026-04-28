@@ -82,7 +82,7 @@ In the NanCy SSIL framework, it is perfectly acceptable—and often encouraged�
 ## Getting Started
 
 > [!WARNING]
-> Tämä on varoitus.
+> Use only for research and development. NanCy's protection hasn't been activated yet.
 
 ### Prerequisites
 
