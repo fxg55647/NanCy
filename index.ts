@@ -1,5 +1,5 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
-import { appendFileSync, readFileSync, readdirSync, statSync, accessSync, constants } from "fs";
+import { appendFileSync, readFileSync, readdirSync, statSync, accessSync, constants, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 
 function isWritable(filePath: string): boolean {
@@ -24,6 +24,46 @@ interface AnalysisConfig {
 
 interface NancyConfig {
   analysis?: AnalysisConfig;
+  browser?: {
+    port?: number;
+    token?: string;
+  };
+}
+
+async function fetchBrowserSnapshot(port: number, token?: string): Promise<string | null> {
+  try {
+    const headers: Record<string, string> = {};
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const res = await fetch(`http://127.0.0.1:${port}/snapshot?format=ai`, { headers });
+    if (!res.ok) return null;
+    return await res.text();
+  } catch {
+    return null;
+  }
+}
+
+function snapshotFilename(params: unknown): string {
+  const now = new Date();
+  const dd = String(now.getDate()).padStart(2, "0");
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const yyyy = now.getFullYear();
+  const HH = String(now.getHours()).padStart(2, "0");
+  const MM = String(now.getMinutes()).padStart(2, "0");
+  const SS = String(now.getSeconds()).padStart(2, "0");
+  const ms = String(now.getMilliseconds()).padStart(3, "0");
+  const datePart = `${dd}-${mm}-${yyyy}`;
+  const timePart = `${HH}-${MM}-${SS}-${ms}`;
+  let identifier = "browser";
+  try {
+    const url = String((params as Record<string, unknown>)?.url ?? "");
+    if (url) {
+      const parsed = new URL(url);
+      const hostname = parsed.hostname.replace(/[^a-z0-9.-]/gi, "-");
+      const path = parsed.pathname.replace(/[^a-z0-9]/gi, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 30);
+      identifier = path ? `${hostname}_${path}` : hostname;
+    }
+  } catch { }
+  return `${datePart}_${timePart}_${identifier}.txt`;
 }
 
 async function callLlm(cfg: AnalysisConfig, prompt: string): Promise<string | null> {
@@ -75,6 +115,8 @@ export default definePluginEntry({
   register(api) {
     const logFile = join(api.rootDir ?? ".", "nancy.log");
     const analysisLog = join(api.rootDir ?? ".", "nancy-analysis.log");
+    const snapshotsDir = join(api.rootDir ?? ".", "snapshots");
+    mkdirSync(snapshotsDir, { recursive: true });
     // api.pluginConfig holds plugins.entries.nancy.config — distinct from api.config (full openclaw config)
     const nancyConfig = api.pluginConfig as NancyConfig;
 
@@ -97,6 +139,10 @@ export default definePluginEntry({
         appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "security_warning", writableFiles: writable.map(f => f.label) }) + "\n");
       } else {
         console.log("[nancy] ✓ Protected files are read-only");
+      }
+
+      if (!nancyConfig.analysis) {
+        console.warn("[nancy] ⚠️  analysis is not configured — security analysis disabled");
       }
 
       const cfg = api.config as Record<string, unknown>;
@@ -161,8 +207,14 @@ export default definePluginEntry({
     const ANALYZE_IF_RISKY = new Set(["exec", "shell", "bash", "run_command"]);
     // Skip read-only and harmless shell commands to avoid adding Gemini latency with no security value
     const SAFE_EXEC = /^(ls|pwd|mkdir|echo|cat|head|tail|whoami|date|cd|cp|mv)\b/;
+    // Browser commands that interact with the page — snapshot taken before each
+    const BROWSER_INTERACT = new Set(["act", "navigate", "click", "fill", "type", "submit", "press", "drag", "select"]);
 
     function shouldAnalyze(toolName: string, params: unknown): boolean {
+      if (toolName === "browser") {
+        const cmd = String((params as Record<string, unknown>)?.command ?? "");
+        return BROWSER_INTERACT.has(cmd);
+      }
       if (ALWAYS_ANALYZE.has(toolName)) {
         // Writes to tasks/ are part of the confirmation bookkeeping protocol — skip analysis
         if (toolName === "write" || toolName === "write_file") {
@@ -213,6 +265,18 @@ export default definePluginEntry({
         if (taskFile) currentTask = JSON.parse(readFileSync(taskFile, "utf8"));
       } catch { }
 
+      let snapshotContext = "";
+      if (event.toolName === "browser") {
+        const port = nancyConfig.browser?.port ?? 18791;
+        const snapshot = await fetchBrowserSnapshot(port, nancyConfig.browser?.token);
+        if (snapshot) {
+          snapshotContext = `Current browser state (what the agent sees before this action): ${snapshot.slice(0, 4000)}. `;
+          const fname = snapshotFilename(event.params);
+          writeFileSync(join(snapshotsDir, fname), snapshot);
+          appendFileSync(analysisLog, JSON.stringify({ ts, event: "browser_snapshot", file: fname, chars: snapshot.length }) + "\n");
+        }
+      }
+
       const taskContext = currentTask ? `Current confirmed task: ${JSON.stringify(currentTask)}. ` : "";
       const historyContext = recentCalls.length > 1
         ? `Recent tool call history (oldest first): ${JSON.stringify(recentCalls.slice(0, -1))}. `
@@ -220,7 +284,7 @@ export default definePluginEntry({
       const reasoningContext = recentReasoning.length > 0
         ? `Recent agent reasoning/thinking (Claude thinking blocks, newest last): ${JSON.stringify(recentReasoning)}. `
         : "";
-      const prompt = `You are a stateless security observer for an AI agent. You have no memory of previous calls. ${taskContext}${historyContext}${reasoningContext}Briefly describe what is happening in this tool call, whether the sequence of actions seems safe or suspicious, and whether it matches the confirmed task. Tool call being evaluated: ${JSON.stringify(event.params)}`;
+      const prompt = `You are a stateless security observer for an AI agent. You have no memory of previous calls. ${taskContext}${historyContext}${reasoningContext}${snapshotContext}Briefly describe what is happening in this tool call, whether the sequence of actions seems safe or suspicious, and whether it matches the confirmed task. Tool call being evaluated: ${JSON.stringify(event.params)}`;
 
       // Awaiting here is intentional — before_tool_call blocks until analysis completes
       try {
@@ -229,6 +293,17 @@ export default definePluginEntry({
       } catch (err) {
         appendFileSync(analysisLog, JSON.stringify({ ts, toolName: event.toolName, error: String(err) }) + "\n");
       }
+    });
+
+    const WEB_SNAPSHOT_TOOLS = new Set(["web_fetch", "web_form_submit"]);
+
+    api.on("after_tool_call", (event, _ctx) => {
+      if (!WEB_SNAPSHOT_TOOLS.has(event.toolName)) return;
+      const ts = new Date().toISOString();
+      const fname = snapshotFilename(event.params);
+      const content = JSON.stringify({ ts, toolName: event.toolName, params: event.params, result: (event as Record<string, unknown>).result ?? null }, null, 2);
+      writeFileSync(join(snapshotsDir, fname), content);
+      appendFileSync(analysisLog, JSON.stringify({ ts, event: "web_snapshot", file: fname }) + "\n");
     });
   },
 });
