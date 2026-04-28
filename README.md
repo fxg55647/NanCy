@@ -43,6 +43,8 @@ NanCy implements a strict Zero-Trust policy for web navigation. It verifies doma
 
 To prevent indirect prompt injections, NanCy "scrambles" the syntax of incoming data in certain situations. This destroys a possible prompt injection while still allowing NanCy to detect it.
 
+This feature is powered by **[PIDD (Prompt Injection Disarming & Detection)](https://github.com/fxg55647/PIDD)** — a standalone library that splits untrusted input into character-based chunks with randomized boundaries, shuffles the words within each segment, and passes the result to a dedicated evaluation model. The evaluator returns `go`, `no`, or `clarify` without ever following the content it analyzes. PIDD can be used independently of NanCy in any LLM pipeline.
+
 ### 5. DOM Biopsy
 
 Before any interaction with a web element (clicks, form submits), NanCy performs a "biopsy" of the underlying HTML code to ensure the element’s true function matches the agent's reported intent.
