@@ -129,7 +129,7 @@ export default definePluginEntry({
         { label: "AGENTS.md", path: join(workspaceDir, "AGENTS.md") },
         { label: "IDENTITY.md", path: join(workspaceDir, "IDENTITY.md") },
         { label: "MEMORY.md", path: join(workspaceDir, "MEMORY.md") },
-        { label: "nancy/index.ts", path: join(api.rootDir ?? ".", "index.ts") },
+        { label: "nancy/src/index.ts", path: join(api.rootDir ?? ".", "src", "index.ts") },
         { label: "nancy/openclaw.plugin.json", path: join(api.rootDir ?? ".", "openclaw.plugin.json") },
       ];
 
