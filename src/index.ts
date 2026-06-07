@@ -26,9 +26,16 @@ interface NancyConfig {
   analysis?: AnalysisConfig;
   browser?: { port?: number; token?: string; };
   mainSessionKey?: string;
+  mainSessionIdleMinutes?: number;
   workerAgentId?: string;
   domainCheck?: { safeBrowsingApiKey: string; };
 }
+
+type SubagentRuntime = {
+  run: (p: { sessionKey: string; message: string; idempotencyKey?: string }) => Promise<{ runId: string }>;
+  waitForRun: (p: { runId: string; timeoutMs?: number }) => Promise<{ status: "ok" | "error" | "timeout"; error?: string }>;
+  deleteSession: (p: { sessionKey: string; deleteTranscript?: boolean }) => Promise<void>;
+};
 
 async function fetchBrowserSnapshot(port: number, token?: string): Promise<string | null> {
   try {
@@ -180,9 +187,18 @@ export default definePluginEntry({
     const terminatedSessions = new Map<string, boolean>();
     const callCounters = new Map<string, number>();
     const recentCallsPerSession = new Map<string, Array<{ ts: string; toolName: string; params: unknown }>>();
+    const lastActivityMs = new Map<string, number>();
 
     // Global rolling buffer of recent reasoning blocks (from any session)
     const recentReasoning: Array<{ ts: string; text: string }> = [];
+
+    function getSubagentRuntime(): SubagentRuntime {
+      return (api.runtime as unknown as { subagent: SubagentRuntime }).subagent;
+    }
+
+    function touchActivity(sessionKey: string): void {
+      lastActivityMs.set(sessionKey, Date.now());
+    }
 
     function log(data: Record<string, unknown>): void {
       appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), ...data }) + "\n");
@@ -219,7 +235,8 @@ export default definePluginEntry({
       const workerSessionKey = `agent:${nancyConfig.workerAgentId}:task-${taskId}`;
 
       try {
-        const result = await (api.runtime as unknown as { subagent: { run: (p: Record<string, unknown>) => Promise<{ runId: string }> } }).subagent.run({
+        const subagent = getSubagentRuntime();
+        const result = await subagent.run({
           sessionKey: workerSessionKey,
           message: `Execute this confirmed task:\n\n${description}\n\nTask ID: ${taskId}`,
           idempotencyKey: taskId,
@@ -235,6 +252,19 @@ export default definePluginEntry({
 
         log({ event: "worker_spawned", taskId, runId: result.runId, workerSessionKey });
         console.log(`[nancy] ✓ Worker spawned for task ${taskId} → runId ${result.runId}`);
+
+        // Wait for completion then delete session to prevent cross-task injection
+        subagent.waitForRun({ runId: result.runId, timeoutMs: 30 * 60 * 1000 })
+          .then(waitResult => {
+            log({ event: "worker_done", taskId, runId: result.runId, status: waitResult.status });
+            return subagent.deleteSession({ sessionKey: workerSessionKey, deleteTranscript: false });
+          })
+          .then(() => {
+            log({ event: "worker_session_deleted", taskId, workerSessionKey });
+            console.log(`[nancy] ✓ Worker session cleaned up for task ${taskId}`);
+          })
+          .catch((err: unknown) => log({ event: "worker_cleanup_error", taskId, error: String(err) }));
+
       } catch (err) {
         log({ event: "worker_spawn_error", taskId, error: String(err) });
         console.warn(`[nancy] ⚠️  Failed to spawn worker for task ${taskId}: ${err}`);
@@ -325,6 +355,25 @@ Reply ONLY with valid JSON:
         const domainStatus = nancyConfig.domainCheck ? `✅ Domain check: enabled` : `⚠️ Domain check: disabled`;
         telegramAlert(botToken, chatId, `🛡 *NanCy online*\n${statusLine}\n${analysisStatus}\n${domainStatus}`);
       }
+
+      // Idle reset: check every 5 min, reset main session after configured idle time
+      const idleMinutes = nancyConfig.mainSessionIdleMinutes ?? 60;
+      const idleMs = idleMinutes * 60 * 1000;
+      const mainKey = nancyConfig.mainSessionKey;
+      if (mainKey) {
+        setInterval(() => {
+          const last = lastActivityMs.get(mainKey);
+          if (!last) return;
+          if (Date.now() - last < idleMs) return;
+          lastActivityMs.delete(mainKey);
+          getSubagentRuntime().deleteSession({ sessionKey: mainKey, deleteTranscript: false })
+            .then(() => {
+              log({ event: "main_session_idle_reset", sessionKey: mainKey, idleMinutes });
+              console.log(`[nancy] ✓ Main session reset after ${idleMinutes} min idle`);
+            })
+            .catch((err: unknown) => log({ event: "main_session_reset_error", error: String(err) }));
+        }, 5 * 60 * 1000);
+      }
     });
 
     api.on("session_start", (event, ctx) => {
@@ -359,6 +408,7 @@ Reply ONLY with valid JSON:
       const isGroup = (event as Record<string, unknown>).isGroup ? "group" : "direct";
       console.log(`[nancy] inbound ${channel} ${from} (${isGroup}, ${body.length} chars)`);
       appendFileSync(logFile, JSON.stringify({ ts, event: "message_received", channel, from, isGroup: !!(event as Record<string, unknown>).isGroup, bodyLen: body.length }) + "\n");
+      if (ctx.sessionKey) touchActivity(ctx.sessionKey);
     });
 
     api.on("before_tool_call", async (event, ctx) => {
@@ -367,6 +417,7 @@ Reply ONLY with valid JSON:
       const { toolName, params } = event;
 
       log({ event: "before_tool_call", sessionKey, runId: ctx.runId, toolName, params });
+      touchActivity(sessionKey);
 
       // 1. Terminated session — block everything
       if (terminatedSessions.get(sessionKey)) {
