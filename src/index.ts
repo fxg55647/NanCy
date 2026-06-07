@@ -354,13 +354,8 @@ Reply ONLY with valid JSON:
       if (urlParam && nancyConfig.domainCheck) {
         const { safe, threats } = await checkDomain(urlParam, nancyConfig.domainCheck.safeBrowsingApiKey);
         if (!safe) {
-          const reason = `Domain flagged by Google Safe Browsing (${threats.join(", ")}). Do not retry this request.`;
           logAnalysis({ event: "domain_block", sessionKey, url: urlParam, threats });
-          const { botToken, chatId } = getTelegram();
-          if (botToken && chatId) {
-            telegramAlert(botToken, chatId, `🚫 *NanCy: domain blocked*\nSession: \`${sessionKey}\`\nURL: \`${urlParam}\`\nThreats: ${threats.join(", ")}`);
-          }
-          return { block: true, blockReason: `[NanCy SSIL] ${reason}` };
+          return { block: true, blockReason: `[NanCy SSIL] Domain flagged by Google Safe Browsing (${threats.join(", ")}). Do not retry this request.` };
         }
       }
 
