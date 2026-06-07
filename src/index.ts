@@ -26,6 +26,7 @@ interface NancyConfig {
   analysis?: AnalysisConfig;
   browser?: { port?: number; token?: string; };
   mainSessionKey?: string;
+  workerAgentId?: string;
   domainCheck?: { safeBrowsingApiKey: string; };
 }
 
@@ -202,6 +203,42 @@ export default definePluginEntry({
 
     function isMainSession(sessionKey: string | undefined): boolean {
       return !!nancyConfig.mainSessionKey && sessionKey === nancyConfig.mainSessionKey;
+    }
+
+    function isWorkerSession(sessionKey: string | undefined): boolean {
+      if (!sessionKey || !nancyConfig.workerAgentId) return false;
+      return sessionKey.startsWith(`agent:${nancyConfig.workerAgentId}:`);
+    }
+
+    async function spawnWorkerForTask(task: Record<string, unknown>): Promise<void> {
+      if (!nancyConfig.workerAgentId) return;
+      if (task.subagent_run_id) return; // already spawned
+
+      const taskId = String(task.id ?? "");
+      const description = String(task.description ?? "");
+      const workerSessionKey = `agent:${nancyConfig.workerAgentId}:task-${taskId}`;
+
+      try {
+        const result = await (api.runtime as unknown as { subagent: { run: (p: Record<string, unknown>) => Promise<{ runId: string }> } }).subagent.run({
+          sessionKey: workerSessionKey,
+          message: `Execute this confirmed task:\n\n${description}\n\nTask ID: ${taskId}`,
+          idempotencyKey: taskId,
+        });
+
+        const workspaceDir = api.runtime.agent.resolveAgentWorkspaceDir(api.config);
+        const updated = { ...task, subagent_run_id: result.runId };
+        const updatedJson = JSON.stringify(updated, null, 2);
+        const taskFile = join(workspaceDir, "tasks", `${taskId}.json`);
+        const currentFile = join(workspaceDir, "tasks", "current.json");
+        try { writeFileSync(taskFile, updatedJson); } catch { }
+        try { writeFileSync(currentFile, updatedJson); } catch { }
+
+        log({ event: "worker_spawned", taskId, runId: result.runId, workerSessionKey });
+        console.log(`[nancy] ✓ Worker spawned for task ${taskId} → runId ${result.runId}`);
+      } catch (err) {
+        log({ event: "worker_spawn_error", taskId, error: String(err) });
+        console.warn(`[nancy] ⚠️  Failed to spawn worker for task ${taskId}: ${err}`);
+      }
     }
 
     async function runMacroReview(sessionKey: string, calls: Array<{ ts: string; toolName: string; params: unknown }>): Promise<void> {
@@ -505,13 +542,27 @@ Reply ONLY with valid JSON — no other text, no markdown:
 
     const WEB_SNAPSHOT_TOOLS = new Set(["web_fetch", "web_form_submit"]);
 
-    api.on("after_tool_call", (event, _ctx) => {
-      if (!WEB_SNAPSHOT_TOOLS.has(event.toolName)) return;
-      const ts = new Date().toISOString();
-      const fname = snapshotFilename(event.params);
-      const content = JSON.stringify({ ts, toolName: event.toolName, params: event.params, result: (event as Record<string, unknown>).result ?? null }, null, 2);
-      writeFileSync(join(snapshotsDir, fname), content);
-      logAnalysis({ event: "web_snapshot", file: fname });
+    api.on("after_tool_call", async (event, _ctx) => {
+      // Web result snapshot
+      if (WEB_SNAPSHOT_TOOLS.has(event.toolName)) {
+        const ts = new Date().toISOString();
+        const fname = snapshotFilename(event.params);
+        const content = JSON.stringify({ ts, toolName: event.toolName, params: event.params, result: (event as Record<string, unknown>).result ?? null }, null, 2);
+        writeFileSync(join(snapshotsDir, fname), content);
+        logAnalysis({ event: "web_snapshot", file: fname });
+      }
+
+      // Spawn worker when main agent writes tasks/current.json
+      if (event.toolName === "write" || event.toolName === "write_file") {
+        const writePath = String((event.params as Record<string, unknown>)?.path ?? "");
+        const normalizedPath = writePath.replace(/\\/g, "/");
+        if (normalizedPath.endsWith("/tasks/current.json") || normalizedPath === "tasks/current.json") {
+          const task = await loadCurrentTask();
+          if (task) {
+            spawnWorkerForTask(task as Record<string, unknown>).catch(() => {});
+          }
+        }
+      }
     });
   },
 });
