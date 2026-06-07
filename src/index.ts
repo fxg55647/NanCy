@@ -366,7 +366,7 @@ Reply ONLY with valid JSON:
 
       // 5. Route by session type
       if (isMainSession(sessionKey)) {
-        // Main session: reads always allowed, state changes always blocked
+        // State-changing tools: always block without analysis
         if (MAIN_ALWAYS_BLOCK.has(toolName)) {
           return { block: true, blockReason: `[NanCy SSIL] '${toolName}' is not permitted in the main session. Create a confirmed task first.` };
         }
@@ -376,8 +376,47 @@ Reply ONLY with valid JSON:
             return { block: true, blockReason: `[NanCy SSIL] Browser '${cmd}' is not permitted in the main session. Create a confirmed task first.` };
           }
         }
-        // All other tools (web_search, web_fetch, read, read_file, browser navigate/snapshot, email read) → go
-        logAnalysis({ event: "main_go", sessionKey, toolName });
+
+        // Pure local reads: always go
+        if (toolName === "read" || toolName === "read_file" || toolName === "web_search") {
+          logAnalysis({ event: "main_go", sessionKey, toolName });
+          return;
+        }
+
+        // web_fetch and browser navigate: analyze — GET requests can trigger purchases,
+        // unsubscribes, or other state changes depending on the URL
+        const analysisCfg = nancyConfig.analysis;
+        if (!analysisCfg) {
+          logAnalysis({ event: "main_no_config", sessionKey, toolName });
+          return;
+        }
+
+        const fetchUrl = String((params as Record<string, unknown>)?.url ?? (params as Record<string, unknown>)?.command ?? "");
+        const mainPrompt = `You are NanCy SSIL observing the MAIN (chat/research) session of an AI agent.
+The main session may only retrieve information passively. It must not trigger purchases, sign-ups, account changes, unsubscribes, or any state-changing actions.
+
+Tool call: ${toolName}
+URL or target: ${fetchUrl}
+Full params: ${JSON.stringify(params)}
+
+Could fetching or navigating to this URL trigger any real-world action (purchase, form submission, account change, unsubscribe, etc.)?
+Or is this purely passive information retrieval?
+
+Reply ONLY with valid JSON — no other text:
+{"verdict":"go","reason":"<one sentence>"}    — safe passive retrieval
+{"verdict":"block","reason":"<one sentence>"}  — could trigger action; requires confirmed task`;
+
+        try {
+          const response = await callLlm(analysisCfg, mainPrompt);
+          const { verdict, reason } = parseVerdict(response, false);
+          logAnalysis({ event: "main_verdict", sessionKey, toolName, verdict, reason });
+          if (verdict === "block") {
+            return { block: true, blockReason: `[NanCy SSIL] ${reason} Create a confirmed task first.` };
+          }
+        } catch (err) {
+          logAnalysis({ event: "main_analysis_error", sessionKey, toolName, error: String(err) });
+          return { block: true, blockReason: "[NanCy SSIL] Security analysis failed. Blocking as precaution." };
+        }
         return;
       }
 
