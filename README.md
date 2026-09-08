@@ -85,6 +85,20 @@ In the NanCy SSIL framework, it is perfectly acceptable—and often encouraged�
 **A failed task is a minor inconvenience; an unauthorized credit card drain is a catastrophe.** NanCy SSIL ensures that when the system fails, it fails safely.
 
 
+## Where This Fits (as of September 2026)
+
+Is a stateless external model gating an agent's actions against a locked intent a novel idea? No — by September 2026 this is a widely recognized, increasingly standard pattern in agent security, not something invented here:
+
+- **AI Control / trusted monitoring.** Research groups including Redwood Research frame this exact shape — a well-understood "trusted" model reviewing a more capable, potentially subversive "untrusted" agent's actions and deciding what to allow, flag, or block — as "trusted monitoring." Active 2026 work in the same space (Ctrl-Z, Bootstrapped Monitoring, Factor(T,U)) is refining the same core idea at frontier scale; NanCy implements a small, single-plugin version of it.
+- **Intent-based guardrails.** Industry security literature now names this directly: continuously verifying an agent's actions against approved intent, before execution rather than after, appears in frameworks like Proofpoint's "Agent Integrity Framework – 2026 Edition" and the AgentDoG diagnostic framework, and in academic work like "The Alignment Gate: Intent and Instruction Guardrails for Agentic AI" (ESANN 2026).
+- **A limitation this shares with everyone else's, not a NanCy-specific flaw.** LLM-as-judge intent verification has measured reliability limits — cross-model agreement on "intent resolution" scoring runs around 80%, meaning even well-designed judges disagree with each other roughly one time in five. Treat NanCy's verdicts as a strong signal, not ground truth — consistent with the "Pragmatism over Perfection" stance above.
+- **What's more specific here:** the stateless framing (no persisted conversation with the reviewer for an attacker to "gaslight" over multiple turns), the confirmation lock being *code-enforced* rather than merely prompted (the agent cannot write its own "confirmed" record — see feature #2), and packaging all of it as a small, single-file plugin for one specific agent framework (OpenClaw) rather than a platform.
+
+One recommendation that does come directly out of the AI-control literature: the reviewer model should be genuinely independent of the agent it's reviewing, to avoid correlated blind spots (or, in the adversarial framing, monitor/agent collusion). NanCy's `analysis` config has always been fully independent of whatever model runs the main OpenClaw agent — see [Reviewer model independence](#reviewer-model-independence) below — and now also warns at startup if the two appear to be the same model.
+
+Sources: [Redwood Research — AI Control](https://www.redwoodresearch.org/research/ai-control) · [Ctrl-Z: Controlling AI Agents Through Resampling](https://blog.redwoodresearch.org/p/guide) · [Bootstrapped Monitoring](https://arxiv.org/pdf/2606.11998) · [Factor(T,U)](https://arxiv.org/pdf/2512.02157) · [Agent Integrity Framework – 2026 Edition (Proofpoint)](https://www.proofpoint.com/us/resources/white-papers/agent-integrity-framework) · [AgentDoG](https://arxiv.org/html/2601.18491) · [The Alignment Gate (ESANN 2026)](https://www.esann.org/sites/default/files/proceedings/2026/ES2026-172.pdf) · [How do you verify an AI agent's intent before execution? (Token Security)](https://www.token.security/blog/how-do-you-verify-an-ai-agents-intent-before-execution)
+
+
 ## Getting Started
 
 > [!WARNING]
@@ -135,6 +149,10 @@ Add the plugin path to the `plugins.load.paths` array and enable it under `plugi
 | `openai` | `gpt-4.1-mini` | No |
 | `anthropic` | `claude-haiku-4-5-20251001` | No |
 | `openai-compat` | `llama-3.3-70b-versatile` | Yes (e.g. `https://api.groq.com/openai`) |
+
+#### Reviewer model independence
+
+`analysis` is entirely separate from whatever model runs the main OpenClaw agent — set here in `plugins.entries.nancy.config`, and never read from the agent's own model config. Pick any provider/model combination independent of the main agent's, which the [AI-control literature](#where-this-fits-as-of-september-2026) recommends specifically to avoid the reviewer sharing the agent's blind spots. At startup NanCy makes a best-effort check (string comparison, not authoritative — model-ref naming isn't standardized) and logs a warning if `analysis.model` appears to match the main agent's configured model.
 
 #### Domain Border Control (optional)
 

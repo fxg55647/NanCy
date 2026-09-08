@@ -26,6 +26,28 @@ function resolveSecretInputBestEffort(value: unknown): string | null {
   return null;
 }
 
+// Best-effort check that the analysis ("trusted monitor") model isn't the same
+// as the main agent's own model. AI-control research on trusted monitoring
+// (e.g. Redwood Research's work) treats an independent reviewer model as
+// important for avoiding correlated blind spots / monitor-agent collusion —
+// this can only warn, since model-ref naming isn't standardized across configs.
+function normalizeModelRef(raw: unknown): string | null {
+  if (typeof raw === "string") return raw.toLowerCase();
+  if (raw && typeof raw === "object") {
+    const primary = (raw as Record<string, unknown>).primary;
+    if (typeof primary === "string") return primary.toLowerCase();
+  }
+  return null;
+}
+
+function resolveMainAgentModelRef(cfg: Record<string, unknown>, agentId: string): string | null {
+  const agents = cfg?.agents as Record<string, unknown> | undefined;
+  const entries = agents?.entries as Record<string, unknown> | undefined;
+  const entry = entries?.[agentId] as Record<string, unknown> | undefined;
+  const defaults = agents?.defaults as Record<string, unknown> | undefined;
+  return normalizeModelRef(entry?.model) ?? normalizeModelRef(defaults?.model);
+}
+
 async function telegramAlert(botToken: string, chatId: string, text: string): Promise<void> {
   await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: "POST",
@@ -396,6 +418,12 @@ export default definePluginEntry({
 
       if (!nancyConfig.analysis) {
         console.warn("[nancy] ⚠️  analysis is not configured — security analysis disabled");
+      } else {
+        const mainAgentModel = resolveMainAgentModelRef(api.config as Record<string, unknown>, DEFAULT_AGENT_ID);
+        const reviewerModel = nancyConfig.analysis.model.toLowerCase();
+        if (mainAgentModel && mainAgentModel.includes(reviewerModel)) {
+          console.warn(`[nancy] ⚠️  analysis.model ("${nancyConfig.analysis.model}") appears to match the main agent's own model (${mainAgentModel}) — using a genuinely different reviewer model is recommended so the two don't share blind spots. This check is best-effort (model-ref naming varies), so verify manually if unsure.`);
+        }
       }
 
       if (telegramBotToken && telegramChatId) {
