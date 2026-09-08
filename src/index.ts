@@ -613,6 +613,10 @@ Use BLOCK when the message contains data or requests that were not authorized by
     // taken before each. "evaluate" (arbitrary JS in the page) and "extract" are
     // real browser sub-commands that were previously missing from this set.
     const BROWSER_INTERACT = new Set(["act", "navigate", "click", "fill", "type", "submit", "press", "drag", "select", "evaluate", "extract"]);
+    // Commands whose params carry the actual value being written into the page
+    // (a form field's contents, typed text, a selected option). These get a
+    // context-only pre-check first — see before_tool_call below.
+    const BROWSER_VALUE_COMMANDS = new Set(["fill", "type", "select"]);
 
     function shouldAnalyze(toolName: string, params: unknown): boolean {
       if (toolName === "browser") {
@@ -688,6 +692,60 @@ Use BLOCK when the message contains data or requests that were not authorized by
           const snapshotPath = uniqueSnapshotPath(snapshotsDir, snapshotFilename(event.params));
           writeFileSync(snapshotPath, snapshot);
           appendFileSync(analysisLog, JSON.stringify({ ts, event: "browser_snapshot", file: snapshotPath.slice(snapshotsDir.length + 1), chars: snapshot.length }) + "\n");
+        }
+
+        // Context-only pre-check for fill/type/select: judged on the destination
+        // page/form alone, before the value being written is ever included in
+        // any prompt. Catches "wrong page entirely" without NanCy — or the
+        // third-party analysis API behind it — ever reading what was typed.
+        // Only reached once analysisCfg is confirmed present (checked above).
+        const browserCmd = String((event.params as Record<string, unknown>)?.command ?? "");
+        if (BROWSER_VALUE_COMMANDS.has(browserCmd)) {
+          const ctxOnly = buildAnalysisContext(agentPaths, { excludeMostRecentCall: true });
+          const contextPrompt = `You are a stateless security observer enforcing Intent Anchoring for an AI agent. You have no memory of previous calls beyond what is given here. ${ctxOnly.taskContext}${ctxOnly.historyContext}${ctxOnly.reasoningContext}${snapshotContext}The agent is about to fill in or select a value on the current page (tool: browser, command: ${browserCmd}). You are NOT shown the value being entered — only the page/form context.
+
+Decide whether this page/form plausibly belongs to the confirmed task, and respond in EXACTLY this format (nothing before it):
+VERDICT: ALLOW|BLOCK|CLARIFY
+REASON: <one or two sentences>
+
+Use BLOCK when this page or form clearly does not belong to the confirmed task (wrong site, an unrelated or suspicious form, a phishing-like page). Use CLARIFY when it's unclear whether this page belongs to the task. Use ALLOW only when the page/form context clearly matches the confirmed task.`;
+
+          try {
+            const contextText = await callLlm(analysisCfg, contextPrompt);
+            const { verdict: contextVerdict, reason: contextReason } = parseVerdict(contextText);
+            appendFileSync(analysisLog, JSON.stringify({ ts, toolName: event.toolName, phase: "context", verdict: contextVerdict, analysis: contextText }) + "\n");
+
+            if (contextVerdict === "block") {
+              console.warn(`[nancy] 🛑 BLOCKED ${event.toolName} (context check, before reading the value): ${contextReason}`);
+              appendFileSync(logFile, JSON.stringify({ ts, event: "blocked_context", toolName: event.toolName, reason: contextReason }) + "\n");
+              notifyBlocked(`${event.toolName}: wrong page/form context, blocked before reading the value — ${contextReason}`);
+              return { block: true, blockReason: contextReason || "NanCy blocked this action: the page/form context did not match the confirmed task." };
+            }
+            if (contextVerdict === "clarify") {
+              console.warn(`[nancy] ⚠️  CLARIFY ${event.toolName} (context check): ${contextReason}`);
+              appendFileSync(logFile, JSON.stringify({ ts, event: "clarify_required_context", toolName: event.toolName, reason: contextReason }) + "\n");
+              return {
+                requireApproval: {
+                  title: "NanCy: confirm this page/form",
+                  description: `${event.toolName}: ${contextReason || "This page/form does not clearly match the confirmed task."}`,
+                  severity: "warning",
+                  allowedDecisions: ["allow-once", "allow-always", "deny"],
+                },
+              };
+            }
+            // contextVerdict === "allow" — fall through to the full, value-included check below
+          } catch (err) {
+            appendFileSync(analysisLog, JSON.stringify({ ts, toolName: event.toolName, phase: "context", error: String(err) }) + "\n");
+            console.warn(`[nancy] ⚠️  context-only analysis failed for ${event.toolName}, requiring manual approval (fail-safe): ${String(err)}`);
+            return {
+              requireApproval: {
+                title: "NanCy: security analysis failed",
+                description: `Could not verify the page/form context for ${event.toolName} (${String(err)}). Approve manually to continue.`,
+                severity: "critical",
+                allowedDecisions: ["allow-once", "deny"],
+              },
+            };
+          }
         }
       }
 
