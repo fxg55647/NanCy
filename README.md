@@ -55,9 +55,9 @@ Before any interaction with a web element (for example form submits), NanCy perf
 
 To prevent "Self-Poisoning," the agent is strictly forbidden from writing to or modifying any files related to its own behavior, logic, or security protocols. This ensures the agent cannot rewrite its own "personality" or disable NanCy's surveillance.
 
-### 7. Thought Verification
+### 7. Stated-Reasoning Context
 
-NanCy monitors the agent's internal "Chain of Thought" from system logs (if supported by selected LLM). If the agent's internal reasoning starts veering toward unauthorized actions, the session is terminated before the action is ever attempted.
+NanCy has no access to a model's hidden internal reasoning — most providers don't expose it, and NanCy makes no claim to read it. When the agent explicitly shares its reasoning in an outgoing message (prefixed with `Reasoning:`), NanCy keeps the last few such statements and feeds them as extra context into the analysis of the agent's next tool calls. If that stated reasoning points toward an unauthorized action, NanCy can block or require approval for the next tool call — it does not terminate the session outright, and it has no visibility into reasoning the agent never states out loud.
 
 
 ## The Philosophy: Assume Compromise & Pragmatic Safety
