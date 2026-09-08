@@ -22,7 +22,7 @@ The mission of NanCy SSIL is to transform OpenClaw from a high-risk experimental
 
 The fundamental innovation of NanCy SSIL revolves around a single, unbreakable loop: **Intent Anchoring.**
 
-Before any autonomous session begins, the user's explicit intent is captured, confirmed and "locked" as the Source of Truth for the session. In this repository, that capture-and-confirm step is carried out by the *agent itself*, following the protocol NanCy asks you to add to `AGENTS.md` (see [Getting Started §3](#3-add-task-confirmation-rules-to-your-agent)); NanCy's own role is to make that instruction file read-only (so the agent can't remove the requirement, see feature #6) and to read the resulting confirmation record as the anchor for the checks below.
+Before any autonomous session begins, the user's explicit intent is captured, confirmed and "locked" as the Source of Truth for the session. In this repository, the agent's only role in that is to *ask* — following the protocol NanCy asks you to add to `AGENTS.md` (see [Getting Started §3](#3-add-task-confirmation-rules-to-your-agent)) — while NanCy's own code reads the user's actual reply, decides whether it was affirmative, and is the sole writer of the resulting confirmation record that anchors the checks below. The agent cannot write that record itself (see feature #6), so it cannot manufacture consent that was never given.
 
 While the primary Agent (OpenClaw) may be susceptible to "intent drift," hallucinations, or prompt injection, NanCy acts as an **external, stateless observer.** It cross-references every critical action—such as submitting a purchase form or sending an outgoing email—against the anchored intent. If the action does not perfectly align with the original goal, NanCy pulls the plug. All other security features in this framework are built to support and enforce this verification process.
 
@@ -35,9 +35,9 @@ This section separates what actually runs today (✅, in `src/index.ts`) from wh
 
 Each tool call is judged by a fresh, one-shot LLM request with no persisted conversation of its own — the analysis model can't be talked around turn-by-turn the way a chatty, stateful guard could. It is given a snapshot of relevant facts (the confirmed task, recent tool calls, recent stated reasoning) as plain context in that single prompt, not a running relationship it can be "gaslit" into trusting.
 
-### 2. Intent Confirmation & Gap Detection 🧭 (partially agent-side)
+### 2. Intent Confirmation & Gap Detection ✅ confirmation / 🧭 gap detection
 
-NanCy itself does not analyze the agent's plan or flag undefined variables — there is no such code in this repository. Today, intent confirmation works as an **agent-side protocol**: the `AGENTS.md` snippet in [Getting Started §3](#3-add-task-confirmation-rules-to-your-agent) instructs the agent to ask the user for explicit confirmation and record it as `tasks/current.json`. NanCy's actual contribution is (a) making `AGENTS.md` read-only so the agent can't remove that requirement (see #6), and (b) reading the resulting confirmation record as the anchor for the checks in #1. Automated gap detection by NanCy is on the roadmap, not implemented.
+The agent only *asks*; NanCy *decides*. Per the `AGENTS.md` snippet in [Getting Started §3](#3-add-task-confirmation-rules-to-your-agent), the agent sends a formatted confirmation request and then waits — it does not write anything. NanCy watches for that outbound message, correlates it with the user's next reply in the same session, and writes `tasks/current.json` itself **only** if that reply is exactly `y`/`yes`; any other reply, or one that never arrives, results in no confirmed task. The agent cannot write to `tasks/` directly (blocked, see #6), so it cannot fabricate its own "confirmed" record — the decision genuinely lives in code, not in an instruction the agent could ignore or a compromised agent could forge. What's still not implemented: NanCy does not itself analyze the agent's plan for undefined variables or gaps before the confirmation is sent — that text is written by the agent.
 
 ### 3. Domain Border Control ✅
 
@@ -59,7 +59,7 @@ Before a browser-interact action (click, fill, submit, etc.), NanCy fetches a te
 
 ### 6. Write-Protection for Core Configuration ✅
 
-NanCy actively blocks any `write`/`write_file` tool call whose target path resolves to `AGENTS.md`, `IDENTITY.md`, `MEMORY.md`, or NanCy's own `src/index.ts` / `openclaw.plugin.json` — this block is unconditional and does not depend on the LLM analysis being configured or correct. Separately, at startup NanCy also audits whether these files are OS-writable and warns if they are (`chmod`-level protection is still recommended as defense in depth, since the audit only warns and doesn't itself change file permissions).
+NanCy actively blocks any `write`/`write_file` tool call whose target path resolves to `AGENTS.md`, `IDENTITY.md`, `MEMORY.md`, NanCy's own `src/index.ts` / `openclaw.plugin.json`, or anywhere under `tasks/` (now written exclusively by NanCy itself, see #2) — this block is unconditional and does not depend on the LLM analysis being configured or correct. Separately, at startup NanCy also audits whether the individual protected files are OS-writable and warns if they are (`chmod`-level protection is still recommended as defense in depth, since the audit only warns and doesn't itself change file permissions).
 
 ### 7. Stated-Reasoning Context ✅
 
@@ -151,37 +151,22 @@ Add a `domains` block next to `analysis` to allow/deny specific domains for `web
 
 ### 3. Add task confirmation rules to your agent
 
-NanCy works together with agent instructions. Add the following to your workspace `AGENTS.md` to require the agent to confirm before any web activity:
+NanCy works together with agent instructions. Add the following to your workspace `AGENTS.md` to require the agent to confirm before any web activity. The agent's job is only to send the confirmation message in exactly this format and then wait — **NanCy itself** reads the user's reply, decides whether it counts as consent, and writes the confirmed task record; the agent cannot write to `tasks/` (see [feature #6](#6-write-protection-for-core-configuration-)), so it cannot fabricate its own confirmation:
 
 ```markdown
 ## Task Confirmation *(main agent only — subagents skip this section)*
 
 Before starting any task that involves sending data to the web follow the next critical order:
 
-**CRITICAL: Send the confirmation message as described below immediately and stop. Do not browse, do not fetch, do not call any tools, and do not prepare anything first. Wait for the reply. Only resume when the user replies with y or Y or Yes or yes.**
+**CRITICAL: Send the confirmation message below as your entire reply, then stop. Do not browse, do not fetch, do not call any tools, and do not prepare anything first, and do not add any extra text before or after it. Wait for the reply. NanCy — not you — decides whether the reply counts as confirmation and records it; only resume the task once you see it reflected as the current confirmed task.**
 
-The confirmation message format ([ID_NUMBER] is a random 8 digit number you generate):
+The confirmation message format ([ID_NUMBER] is a random 8 digit number you generate), sent as the ENTIRE message with nothing else added:
 
 "Formal confirmation: [what you are about to do, including what data will be sent and where].
 Reply y to proceed, any other reply cancels.
 [ID_NUMBER]"
 
-If you are allowed to proceed:
-1. Create the directory `tasks/` in the workspace if it does not exist
-2. Write a file named `tasks/[ID_NUMBER].json` with this exact structure:
-   ```json
-   {
-     "id": "[ID_NUMBER]",
-     "ts": "[current ISO timestamp]",
-     "description": "[what you are about to do]",
-     "status": "confirmed",
-     "openclaw_task_id": null
-   }
-   ```
-3. Copy that file to `tasks/current.json` (overwrite if it exists)
-4. Then proceed with the task
-
-IMPORTANT: Every single attempt requires a fresh confirmation and a new ID file. If a task fails or is interrupted for any reason, the previous confirmation is void. You must request a new confirmation and generate a new ID file before trying again, even if the task is identical to the previous one.
+IMPORTANT: Every single attempt requires a fresh confirmation message with a new ID number. If a task fails or is interrupted for any reason, the previous confirmation is void — send a new confirmation message before trying again, even if the task is identical to the previous one. Do not write to `tasks/` yourself; NanCy blocks it.
 ```
 
 ### 4. Restart OpenClaw
@@ -189,7 +174,7 @@ IMPORTANT: Every single attempt requires a fresh confirmation and a new ID file.
 Nancy starts automatically on the next gateway start. Check that it loaded:
 
 ```
-[nancy] inbound telegram ... (direct, N chars)
+[nancy] inbound telegram ... (N chars)
 ```
 
 Analysis results are written to `nancy-analysis.log` in the plugin directory.

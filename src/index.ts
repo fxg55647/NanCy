@@ -1,6 +1,6 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
-import { appendFileSync, readFileSync, readdirSync, statSync, accessSync, constants, mkdirSync, writeFileSync } from "fs";
-import { join, resolve } from "path";
+import { appendFileSync, readFileSync, accessSync, constants, mkdirSync, writeFileSync } from "fs";
+import { join, resolve, sep } from "path";
 
 function isWritable(filePath: string): boolean {
   try { accessSync(filePath, constants.W_OK); return true; }
@@ -135,6 +135,19 @@ function snapshotFilename(params: unknown): string {
   return `${timePart}_${datePart}_${identifier}${suffix}.txt`;
 }
 
+// Matches the exact confirmation-request format required in AGENTS.md §3.
+function parseConfirmationRequest(content: string): { id: string; description: string } | null {
+  const normalized = content.replace(/\r\n/g, "\n").trim();
+  const m = normalized.match(/^Formal confirmation:\s*([\s\S]*?)\s*\nReply y to proceed, any other reply cancels\.\s*\n(\d{6,10})$/);
+  if (!m) return null;
+  return { description: m[1].trim(), id: m[2].trim() };
+}
+
+// Per AGENTS.md §3: only an exact y/Y/Yes/yes reply counts as consent; anything else cancels.
+function isAffirmativeReply(content: string): boolean {
+  return /^\s*(y|yes)\s*$/i.test(content);
+}
+
 type Verdict = "allow" | "block" | "clarify";
 
 function parseVerdict(text: string | null): { verdict: Verdict; reason: string } {
@@ -210,6 +223,10 @@ export default definePluginEntry({
       { label: "nancy/openclaw.plugin.json", path: join(api.rootDir ?? ".", "openclaw.plugin.json") },
     ];
     const PROTECTED_PATHS = new Map(PROTECTED_FILES.map(f => [resolve(f.path), f.label]));
+    // tasks/ is now written exclusively by NanCy's own confirmation-reply
+    // handling below — the agent must not be able to write its own "confirmed"
+    // record, or it could fabricate user consent that was never given.
+    const TASKS_DIR = resolve(workspaceDir, "tasks");
 
     function protectedWriteTarget(event: { params: unknown; derivedPaths?: readonly string[] }): string | null {
       const candidates: string[] = [];
@@ -217,8 +234,12 @@ export default definePluginEntry({
       if (typeof p === "string") candidates.push(p);
       if (Array.isArray(event.derivedPaths)) candidates.push(...event.derivedPaths);
       for (const c of candidates) {
-        const label = PROTECTED_PATHS.get(resolve(workspaceDir, c));
+        const resolved = resolve(workspaceDir, c);
+        const label = PROTECTED_PATHS.get(resolved);
         if (label) return label;
+        if (resolved === TASKS_DIR || resolved.startsWith(TASKS_DIR + sep)) {
+          return "tasks/ (owned by NanCy's confirmation protocol)";
+        }
       }
       return null;
     }
@@ -265,28 +286,71 @@ export default definePluginEntry({
 
     api.on("message_sending", (event, ctx) => {
       const ts = new Date().toISOString();
-      const text = String((event as Record<string, unknown>).text ?? "");
-      if (!text) return;
-      if (text.startsWith("Reasoning:")) {
-        const reasoningText = text.slice("Reasoning:".length).trim();
+      const content = event.content ?? "";
+      if (!content) return;
+      if (content.startsWith("Reasoning:")) {
+        const reasoningText = content.slice("Reasoning:".length).trim();
         console.log(`[nancy] reasoning: ${reasoningText.slice(0, 120).trim()}…`);
         recentReasoning.push({ ts, text: reasoningText });
         if (recentReasoning.length > 3) recentReasoning.shift();
-        appendFileSync(analysisLog, JSON.stringify({ ts, event: "reasoning", text }) + "\n");
+        appendFileSync(analysisLog, JSON.stringify({ ts, event: "reasoning", text: content }) + "\n");
       } else {
-        console.log(`[nancy] outbound: ${text.slice(0, 100).trim()}${text.length > 100 ? "…" : ""}`);
+        console.log(`[nancy] outbound: ${content.slice(0, 100).trim()}${content.length > 100 ? "…" : ""}`);
       }
-      appendFileSync(logFile, JSON.stringify({ ts, event: "message_sending", channel: ctx.channel ?? "unknown", text }) + "\n");
+      appendFileSync(logFile, JSON.stringify({ ts, event: "message_sending", channel: ctx.channelId ?? "unknown", text: content }) + "\n");
+
+      // Intent Anchoring: the agent only *asks* for confirmation — NanCy is the
+      // one that decides, from the user's actual reply below, whether it was given.
+      const confirmationRequest = parseConfirmationRequest(content);
+      if (confirmationRequest) {
+        if (!ctx.sessionKey) {
+          console.warn(`[nancy] ⚠️  confirmation request seen with no sessionKey to correlate a reply against — ignoring`);
+        } else {
+          pendingConfirmations.set(ctx.sessionKey, { ...confirmationRequest, ts: Date.now() });
+          console.log(`[nancy] confirmation requested: id=${confirmationRequest.id}`);
+          appendFileSync(logFile, JSON.stringify({ ts, event: "confirmation_requested", sessionKey: ctx.sessionKey, id: confirmationRequest.id, description: confirmationRequest.description }) + "\n");
+        }
+      }
     });
 
     api.on("message_received", (event, ctx) => {
       const ts = new Date().toISOString();
-      const channel = ctx.channel ?? "unknown";
-      const from = (event as Record<string, unknown>).senderId ?? "unknown";
-      const body = String((event as Record<string, unknown>).body ?? "");
-      const isGroup = (event as Record<string, unknown>).isGroup ? "group" : "direct";
-      console.log(`[nancy] inbound ${channel} ${from} (${isGroup}, ${body.length} chars)`);
-      appendFileSync(logFile, JSON.stringify({ ts, event: "message_received", channel, from, isGroup: !!(event as Record<string, unknown>).isGroup, bodyLen: body.length }) + "\n");
+      const channel = ctx.channelId ?? "unknown";
+      const from = event.from ?? "unknown";
+      const content = event.content ?? "";
+      console.log(`[nancy] inbound ${channel} ${from} (${content.length} chars)`);
+      appendFileSync(logFile, JSON.stringify({ ts, event: "message_received", channel, from, contentLen: content.length }) + "\n");
+
+      if (!ctx.sessionKey) return;
+      const pending = pendingConfirmations.get(ctx.sessionKey);
+      if (!pending) return;
+      pendingConfirmations.delete(ctx.sessionKey);
+
+      if (Date.now() - pending.ts > CONFIRMATION_TTL_MS) {
+        console.warn(`[nancy] confirmation id=${pending.id} expired before a reply arrived`);
+        appendFileSync(logFile, JSON.stringify({ ts, event: "confirmation_expired", sessionKey: ctx.sessionKey, id: pending.id }) + "\n");
+        return;
+      }
+
+      if (!isAffirmativeReply(content)) {
+        console.log(`[nancy] confirmation id=${pending.id} denied by user reply`);
+        appendFileSync(logFile, JSON.stringify({ ts, event: "confirmation_denied", sessionKey: ctx.sessionKey, id: pending.id, reply: content }) + "\n");
+        return;
+      }
+
+      // NanCy — not the agent — writes the confirmed task record. Writes to
+      // tasks/ by any other actor are blocked in before_tool_call below.
+      try {
+        mkdirSync(TASKS_DIR, { recursive: true });
+        const record = { id: pending.id, ts: new Date().toISOString(), description: pending.description, status: "confirmed", openclaw_task_id: null };
+        writeFileSync(join(TASKS_DIR, `${pending.id}.json`), JSON.stringify(record, null, 2));
+        writeFileSync(join(TASKS_DIR, "current.json"), JSON.stringify(record, null, 2));
+        console.log(`[nancy] ✓ confirmation id=${pending.id} granted, task locked`);
+        appendFileSync(logFile, JSON.stringify({ ts, event: "confirmation_granted", sessionKey: ctx.sessionKey, id: pending.id, description: pending.description }) + "\n");
+      } catch (err) {
+        console.warn(`[nancy] ⚠️  failed to write confirmed task record: ${String(err)}`);
+        appendFileSync(logFile, JSON.stringify({ ts, event: "confirmation_write_error", sessionKey: ctx.sessionKey, id: pending.id, error: String(err) }) + "\n");
+      }
     });
 
     // Rolling buffer of all tool calls this session — gives Gemini sequential context
@@ -294,6 +358,10 @@ export default definePluginEntry({
 
     // Rolling buffer of recent agent reasoning (Claude thinking blocks via message_sending)
     const recentReasoning: Array<{ ts: string; text: string }> = [];
+
+    // Confirmation requests sent to the user, awaiting their y/n reply, keyed by sessionKey
+    const pendingConfirmations = new Map<string, { id: string; description: string; ts: number }>();
+    const CONFIRMATION_TTL_MS = 15 * 60 * 1000;
 
     const ALWAYS_ANALYZE = new Set([
       "web_fetch", "web_form_submit", "web_search", "write", "write_file",
@@ -310,11 +378,6 @@ export default definePluginEntry({
         return BROWSER_INTERACT.has(cmd);
       }
       if (ALWAYS_ANALYZE.has(toolName)) {
-        // Writes to tasks/ are part of the confirmation bookkeeping protocol — skip analysis
-        if (toolName === "write" || toolName === "write_file") {
-          const p = String((params as Record<string, unknown>)?.path ?? "");
-          if (p.replace(/\\/g, "/").includes("/tasks/") || p === "tasks/current.json") return false;
-        }
         return true;
       }
       if (ANALYZE_IF_RISKY.has(toolName)) {
@@ -370,23 +433,11 @@ export default definePluginEntry({
         };
       }
 
+      // NanCy writes tasks/current.json atomically (see message_received above),
+      // so there is no partial-write case to fall back from here.
       let currentTask: unknown = null;
       try {
-        const tasksDir = join(workspaceDir, "tasks");
-        let taskFile: string | null = null;
-        try {
-          // AGENTS.md requires the agent to write current.json (step 3), but it sometimes skips it —
-          // fall back to the newest ID file in that case
-          readFileSync(join(tasksDir, "current.json"));
-          taskFile = join(tasksDir, "current.json");
-        } catch {
-          const latest = readdirSync(tasksDir)
-            .filter(f => f.endsWith(".json"))
-            .map(f => ({ f, mtime: statSync(join(tasksDir, f)).mtimeMs }))
-            .sort((a, b) => b.mtime - a.mtime)[0];
-          if (latest) taskFile = join(tasksDir, latest.f);
-        }
-        if (taskFile) currentTask = JSON.parse(readFileSync(taskFile, "utf8"));
+        currentTask = JSON.parse(readFileSync(join(TASKS_DIR, "current.json"), "utf8"));
       } catch { }
 
       let snapshotContext = "";
