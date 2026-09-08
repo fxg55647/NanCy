@@ -46,6 +46,7 @@ Before every `web_fetch` or browser action that carries a URL (e.g. `navigate`),
 - If `domains.allow` is set, only those domains (and their subdomains) may be reached; everything else is blocked.
 - Otherwise, if `domains.deny` is set, listed domains (and their subdomains) are blocked.
 - Otherwise, the host is looked up against **[URLhaus](https://urlhaus.abuse.ch/)** (abuse.ch), a free, keyless malicious-URL database, and blocked if flagged. This lookup fails open (allows the call) if the third-party API itself is unreachable, so an outage there never blocks legitimate traffic outright — intent-alignment analysis (#1) still runs afterward as a second layer.
+- Optionally (`domains.minAgeDays`, off by default): the domain's registration age, via a free [RDAP](https://about.rdap.org/) lookup. URLhaus only knows about hosts already tied to *known* malware — a domain registered yesterday purely for one targeted attack won't be listed there yet. Age is a different, complementary signal for exactly that case. It's off by default because it's a real false-positive risk (legitimate new sites exist) that reputationCheck mostly isn't — an explicit opt-in for operators who want that trade-off. It also fails open on unresolvable/privacy-redacted records, and its TLD-suffix handling is simplified (see the code comment), so it under-covers multi-part suffixes like `.co.uk` rather than over-blocking.
 
 There is no network-level interception or process kill — like every other NanCy block, this refuses the tool call itself with a reason, before it runs. See [Getting Started](#domain-border-control-optional) for configuration.
 
@@ -172,11 +173,12 @@ Add a `domains` block next to `analysis` to allow/deny specific domains for `web
 ```json
 "domains": {
   "allow": ["trusted-shop.example", "docs.example.com"],
-  "reputationCheck": true
+  "reputationCheck": true,
+  "minAgeDays": 30
 }
 ```
 
-`allow` and `deny` match subdomains automatically (`example.com` also matches `www.example.com`). If `allow` is set, everything not listed is blocked and `deny`/`reputationCheck` are not consulted.
+`allow` and `deny` match subdomains automatically (`example.com` also matches `www.example.com`). If `allow` is set, everything not listed is blocked and `deny`/`reputationCheck`/`minAgeDays` are not consulted. `minAgeDays` is off by default (omit it, or set `0`) — turn it on only if you've accepted the false-positive risk against brand-new legitimate sites (see feature #3).
 
 ### 3. Add task confirmation rules to your agent
 

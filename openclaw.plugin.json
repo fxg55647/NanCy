@@ -67,6 +67,10 @@
           "reputationCheck": {
             "type": "boolean",
             "description": "Look up domains against URLhaus (abuse.ch), a free keyless malicious-URL database, when not covered by allow/deny. Default true."
+          },
+          "minAgeDays": {
+            "type": "number",
+            "description": "Block domains registered more recently than this many days ago, via a free RDAP lookup (WHOIS successor). Catches disposable attack domains too new for any blocklist. Off by default (0/unset) — legitimate new sites exist, so this is a real false-positive risk the operator opts into."
           }
         }
       }
