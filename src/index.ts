@@ -22,12 +22,80 @@ interface AnalysisConfig {
   baseUrl?: string;
 }
 
+interface DomainConfig {
+  allow?: string[];
+  deny?: string[];
+  reputationCheck?: boolean;
+}
+
 interface NancyConfig {
   analysis?: AnalysisConfig;
   browser?: {
     port?: number;
     token?: string;
   };
+  domains?: DomainConfig;
+}
+
+function extractCandidateUrl(toolName: string, params: unknown): string | null {
+  const p = params as Record<string, unknown>;
+  if (toolName === "web_fetch" || toolName === "web_form_submit") {
+    return typeof p?.url === "string" ? p.url : null;
+  }
+  if (toolName === "browser") {
+    return typeof p?.url === "string" ? p.url : null;
+  }
+  return null;
+}
+
+function hostnameMatches(hostname: string, pattern: string): boolean {
+  const h = hostname.toLowerCase();
+  const pat = pattern.toLowerCase().replace(/^\*\./, "");
+  return h === pat || h.endsWith(`.${pat}`);
+}
+
+async function checkUrlhausReputation(hostname: string): Promise<boolean | null> {
+  try {
+    const res = await fetch("https://urlhaus-api.abuse.ch/v1/host/", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: `host=${encodeURIComponent(hostname)}`,
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as { query_status?: string };
+    // "ok" means the host was found in URLhaus's malicious-URL database
+    return data.query_status === "ok";
+  } catch {
+    // Reputation lookup is a best-effort extra signal, not the sole gate —
+    // fail open on network errors rather than blocking every fetch when
+    // the third-party API is unreachable.
+    return null;
+  }
+}
+
+async function checkDomainBorder(url: string, cfg: DomainConfig | undefined): Promise<string | null> {
+  let hostname: string;
+  try {
+    hostname = new URL(url).hostname;
+  } catch {
+    return `Could not parse URL for domain check: ${url}`;
+  }
+
+  if (cfg?.allow && cfg.allow.length > 0) {
+    const allowed = cfg.allow.some(p => hostnameMatches(hostname, p));
+    return allowed ? null : `Domain "${hostname}" is not on the configured allow-list.`;
+  }
+
+  if (cfg?.deny?.some(p => hostnameMatches(hostname, p))) {
+    return `Domain "${hostname}" is on the configured deny-list.`;
+  }
+
+  if (cfg?.reputationCheck !== false) {
+    const malicious = await checkUrlhausReputation(hostname);
+    if (malicious) return `Domain "${hostname}" is flagged as malicious by URLhaus (abuse.ch).`;
+  }
+
+  return null;
 }
 
 async function fetchBrowserSnapshot(port: number, token?: string): Promise<string | null> {
@@ -271,6 +339,18 @@ export default definePluginEntry({
         console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: ${reason}`);
         appendFileSync(logFile, JSON.stringify({ ts, event: "blocked_protected_write", toolName: event.toolName, file: protectedLabel }) + "\n");
         return { block: true, blockReason: reason };
+      }
+
+      // Domain Border Control: block outright before the agent reaches an
+      // unsafe site, independent of LLM analysis.
+      const candidateUrl = extractCandidateUrl(event.toolName, event.params);
+      if (candidateUrl) {
+        const domainBlockReason = await checkDomainBorder(candidateUrl, nancyConfig.domains);
+        if (domainBlockReason) {
+          console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: ${domainBlockReason}`);
+          appendFileSync(logFile, JSON.stringify({ ts, event: "domain_blocked", toolName: event.toolName, url: candidateUrl, reason: domainBlockReason }) + "\n");
+          return { block: true, blockReason: domainBlockReason };
+        }
       }
 
       if (!shouldAnalyze(event.toolName, event.params)) return;

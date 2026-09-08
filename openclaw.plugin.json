@@ -33,6 +33,42 @@
           }
         },
         "required": ["provider", "model", "apiKey"]
+      },
+      "browser": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Connection to the browser tool's snapshot endpoint, used for DOM/page-context checks",
+        "properties": {
+          "port": {
+            "type": "number",
+            "description": "Port the browser tool's snapshot endpoint listens on (default 18791)"
+          },
+          "token": {
+            "type": "string",
+            "description": "Bearer token for the snapshot endpoint, if required"
+          }
+        }
+      },
+      "domains": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Domain Border Control: allow/deny lists and reputation checks for web_fetch, web_form_submit, and browser navigation",
+        "properties": {
+          "allow": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "If set, only these domains (and their subdomains) may be reached; every other domain is blocked"
+          },
+          "deny": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Domains (and their subdomains) that are always blocked, checked when no allow-list is set"
+          },
+          "reputationCheck": {
+            "type": "boolean",
+            "description": "Look up domains against URLhaus (abuse.ch), a free keyless malicious-URL database, when not covered by allow/deny. Default true."
+          }
+        }
       }
     }
   }

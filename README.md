@@ -39,9 +39,15 @@ Each tool call is judged by a fresh, one-shot LLM request with no persisted conv
 
 NanCy itself does not analyze the agent's plan or flag undefined variables — there is no such code in this repository. Today, intent confirmation works as an **agent-side protocol**: the `AGENTS.md` snippet in [Getting Started §3](#3-add-task-confirmation-rules-to-your-agent) instructs the agent to ask the user for explicit confirmation and record it as `tasks/current.json`. NanCy's actual contribution is (a) making `AGENTS.md` read-only so the agent can't remove that requirement (see #6), and (b) reading the resulting confirmation record as the anchor for the checks in #1. Automated gap detection by NanCy is on the roadmap, not implemented.
 
-### 3. Domain Border Control 🧭
+### 3. Domain Border Control ✅
 
-Not implemented in this repository. There is no domain allow/deny-listing and no interception of outbound web traffic before it reaches a site. Today the only web-related coverage is the general intent-alignment analysis applied to `web_fetch`/`web_form_submit`/browser tool calls (see #1), plus a snapshot written to disk after each web fetch/submit for later review.
+Before every `web_fetch`, `web_form_submit`, or browser action that carries a URL, NanCy checks the target host — independent of the LLM analysis, so this still works even without `analysis` configured:
+
+- If `domains.allow` is set, only those domains (and their subdomains) may be reached; everything else is blocked.
+- Otherwise, if `domains.deny` is set, listed domains (and their subdomains) are blocked.
+- Otherwise, the host is looked up against **[URLhaus](https://urlhaus.abuse.ch/)** (abuse.ch), a free, keyless malicious-URL database, and blocked if flagged. This lookup fails open (allows the call) if the third-party API itself is unreachable, so an outage there never blocks legitimate traffic outright — intent-alignment analysis (#1) still runs afterward as a second layer.
+
+There is no network-level interception or process kill — like every other NanCy block, this refuses the tool call itself with a reason, before it runs. See [Getting Started](#domain-border-control-optional) for configuration.
 
 ### 4. Contextual Scrambler 🧭
 
@@ -129,6 +135,19 @@ Add the plugin path to the `plugins.load.paths` array and enable it under `plugi
 | `openai` | `gpt-4.1-mini` | No |
 | `anthropic` | `claude-haiku-4-5-20251001` | No |
 | `openai-compat` | `llama-3.3-70b-versatile` | Yes (e.g. `https://api.groq.com/openai`) |
+
+#### Domain Border Control (optional)
+
+Add a `domains` block next to `analysis` to allow/deny specific domains for `web_fetch`, `web_form_submit`, and browser navigation. With no `domains` config at all, NanCy still checks every target domain against URLhaus's free reputation database (see [feature #3](#3-domain-border-control-)):
+
+```json
+"domains": {
+  "allow": ["trusted-shop.example", "docs.example.com"],
+  "reputationCheck": true
+}
+```
+
+`allow` and `deny` match subdomains automatically (`example.com` also matches `www.example.com`). If `allow` is set, everything not listed is blocked and `deny`/`reputationCheck` are not consulted.
 
 ### 3. Add task confirmation rules to your agent
 
