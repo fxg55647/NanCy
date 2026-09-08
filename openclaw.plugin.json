@@ -52,7 +52,7 @@
       "domains": {
         "type": "object",
         "additionalProperties": false,
-        "description": "Domain Border Control: allow/deny lists and reputation checks for web_fetch, web_form_submit, and browser navigation",
+        "description": "Domain Border Control: allow/deny lists and reputation checks for web_fetch and browser navigation",
         "properties": {
           "allow": {
             "type": "array",

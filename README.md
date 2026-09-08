@@ -33,7 +33,7 @@ This section separates what actually runs today (✅, in `src/index.ts`) from wh
 
 ### 1. Stateless Security Interruption Layer (SSIL) ✅
 
-Each tool call is judged by a fresh, one-shot LLM request with no persisted conversation of its own — the analysis model can't be talked around turn-by-turn the way a chatty, stateful guard could. It is given a snapshot of relevant facts (the confirmed task, recent tool calls, recent stated reasoning) as plain context in that single prompt, not a running relationship it can be "gaslit" into trusting.
+Each tool call — and each outbound message the agent sends through any channel — is judged by a fresh, one-shot LLM request with no persisted conversation of its own — the analysis model can't be talked around turn-by-turn the way a chatty, stateful guard could. It is given a snapshot of relevant facts (the confirmed task, recent tool calls, recent stated reasoning) as plain context in that single prompt, not a running relationship it can be "gaslit" into trusting. Covering outbound messages, not just tool calls, matters because some channels (email via OpenClaw's `imap` extension, for one) dispatch content through message delivery rather than a distinct tool — `before_tool_call` alone would never see it. Outbound-message analysis has one limitation tool-call analysis doesn't: there's no "pause and ask" option for a message in flight, so an uncertain CLARIFY verdict is treated as BLOCK, and analysis failures fail *open* (the message still sends) rather than fail-safe, since muting the agent entirely isn't a graceful fallback either.
 
 ### 2. Intent Confirmation & Gap Detection ✅ confirmation / 🧭 gap detection
 
@@ -41,7 +41,7 @@ The agent only *asks*; NanCy *decides*. Per the `AGENTS.md` snippet in [Getting 
 
 ### 3. Domain Border Control ✅
 
-Before every `web_fetch`, `web_form_submit`, or browser action that carries a URL, NanCy checks the target host — independent of the LLM analysis, so this still works even without `analysis` configured:
+Before every `web_fetch` or browser action that carries a URL (e.g. `navigate`), NanCy checks the target host — independent of the LLM analysis, so this still works even without `analysis` configured:
 
 - If `domains.allow` is set, only those domains (and their subdomains) may be reached; everything else is blocked.
 - Otherwise, if `domains.deny` is set, listed domains (and their subdomains) are blocked.
@@ -59,7 +59,7 @@ Before a browser-interact action (click, fill, submit, etc.), NanCy fetches a te
 
 ### 6. Write-Protection for Core Configuration ✅
 
-NanCy actively blocks any `write`/`write_file` tool call whose target path resolves to `AGENTS.md`, `IDENTITY.md`, `MEMORY.md`, NanCy's own `src/index.ts` / `openclaw.plugin.json`, or anywhere under `tasks/` (now written exclusively by NanCy itself, see #2) — this block is unconditional and does not depend on the LLM analysis being configured or correct. Separately, at startup NanCy also audits whether the individual protected files are OS-writable and warns if they are (`chmod`-level protection is still recommended as defense in depth, since the audit only warns and doesn't itself change file permissions).
+NanCy actively blocks any `write` or `edit` tool call whose target path resolves to `AGENTS.md`, `IDENTITY.md`, `MEMORY.md`, NanCy's own `src/index.ts` / `openclaw.plugin.json`, or anywhere under `tasks/` (now written exclusively by NanCy itself, see #2) — this block is unconditional and does not depend on the LLM analysis being configured or correct. Separately, at startup NanCy also audits whether the individual protected files are OS-writable and warns if they are (`chmod`-level protection is still recommended as defense in depth, since the audit only warns and doesn't itself change file permissions).
 
 ### 7. Stated-Reasoning Context ✅
 
@@ -138,7 +138,7 @@ Add the plugin path to the `plugins.load.paths` array and enable it under `plugi
 
 #### Domain Border Control (optional)
 
-Add a `domains` block next to `analysis` to allow/deny specific domains for `web_fetch`, `web_form_submit`, and browser navigation. With no `domains` config at all, NanCy still checks every target domain against URLhaus's free reputation database (see [feature #3](#3-domain-border-control-)):
+Add a `domains` block next to `analysis` to allow/deny specific domains for `web_fetch` and browser navigation. With no `domains` config at all, NanCy still checks every target domain against URLhaus's free reputation database (see [feature #3](#3-domain-border-control-)):
 
 ```json
 "domains": {
