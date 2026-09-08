@@ -1,6 +1,11 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
-import { appendFileSync, readFileSync, accessSync, constants, mkdirSync, writeFileSync } from "fs";
+import { appendFileSync, readFileSync, accessSync, constants, mkdirSync, writeFileSync, existsSync, statSync, renameSync, readdirSync, unlinkSync } from "fs";
 import { join, resolve, sep } from "path";
+
+// Applied to every outbound fetch below so a hung/slow third-party response
+// can't stall before_tool_call (and therefore the agent) indefinitely.
+const FETCH_TIMEOUT_MS = 15_000;
+const LLM_FETCH_TIMEOUT_MS = 30_000;
 
 function isWritable(filePath: string): boolean {
   try { accessSync(filePath, constants.W_OK); return true; }
@@ -26,6 +31,7 @@ async function telegramAlert(botToken: string, chatId: string, text: string): Pr
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chat_id: chatId, text, parse_mode: "Markdown" }),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
 }
 
@@ -65,17 +71,28 @@ function hostnameMatches(hostname: string, pattern: string): boolean {
   return h === pat || h.endsWith(`.${pat}`);
 }
 
+// Avoids re-querying the same host repeatedly within a session; failures are
+// never cached, only successful lookups (a transient API error next time
+// should still get a fresh attempt rather than being stuck at "unknown").
+const urlhausCache = new Map<string, { malicious: boolean; ts: number }>();
+const URLHAUS_CACHE_TTL_MS = 10 * 60 * 1000;
+
 async function checkUrlhausReputation(hostname: string): Promise<boolean | null> {
+  const cached = urlhausCache.get(hostname);
+  if (cached && Date.now() - cached.ts < URLHAUS_CACHE_TTL_MS) return cached.malicious;
   try {
     const res = await fetch("https://urlhaus-api.abuse.ch/v1/host/", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: `host=${encodeURIComponent(hostname)}`,
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!res.ok) return null;
     const data = await res.json() as { query_status?: string };
     // "ok" means the host was found in URLhaus's malicious-URL database
-    return data.query_status === "ok";
+    const malicious = data.query_status === "ok";
+    urlhausCache.set(hostname, { malicious, ts: Date.now() });
+    return malicious;
   } catch {
     // Reputation lookup is a best-effort extra signal, not the sole gate —
     // fail open on network errors rather than blocking every fetch when
@@ -113,7 +130,7 @@ async function fetchBrowserSnapshot(port: number, token?: string): Promise<strin
   try {
     const headers: Record<string, string> = {};
     if (token) headers["Authorization"] = `Bearer ${token}`;
-    const res = await fetch(`http://127.0.0.1:${port}/snapshot?format=ai`, { headers });
+    const res = await fetch(`http://127.0.0.1:${port}/snapshot?format=ai`, { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
     if (!res.ok) return null;
     return await res.text();
   } catch {
@@ -144,6 +161,23 @@ function snapshotFilename(params: unknown): string {
     }
   } catch { }
   return `${timePart}_${datePart}_${identifier}${suffix}.txt`;
+}
+
+// snapshotFilename's timestamp is second-granularity (kept deliberately short
+// for readability), so two snapshots for the same host in the same second
+// would otherwise silently overwrite each other. This appends -2, -3, ... on
+// collision instead.
+function uniqueSnapshotPath(dir: string, baseName: string): string {
+  let candidate = join(dir, baseName);
+  if (!existsSync(candidate)) return candidate;
+  const dot = baseName.lastIndexOf(".");
+  const stem = dot === -1 ? baseName : baseName.slice(0, dot);
+  const ext = dot === -1 ? "" : baseName.slice(dot);
+  for (let i = 2; i < 1000; i++) {
+    candidate = join(dir, `${stem}-${i}${ext}`);
+    if (!existsSync(candidate)) return candidate;
+  }
+  return join(dir, `${stem}-${Date.now()}${ext}`);
 }
 
 // Matches the exact confirmation-request format required in AGENTS.md §3.
@@ -177,6 +211,7 @@ async function callLlm(cfg: AnalysisConfig, prompt: string): Promise<string | nu
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      signal: AbortSignal.timeout(LLM_FETCH_TIMEOUT_MS),
     });
     const data = await res.json() as Record<string, unknown>;
     if (!res.ok) throw new Error(`Gemini API error ${res.status}: ${JSON.stringify(data)}`);
@@ -190,8 +225,10 @@ async function callLlm(cfg: AnalysisConfig, prompt: string): Promise<string | nu
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${cfg.apiKey}` },
       body: JSON.stringify({ model: cfg.model, messages: [{ role: "user", content: prompt }], max_tokens: 300 }),
+      signal: AbortSignal.timeout(LLM_FETCH_TIMEOUT_MS),
     });
     const data = await res.json() as { choices?: Array<{ message?: { content?: string } }> };
+    if (!res.ok) throw new Error(`${cfg.provider} API error ${res.status}: ${JSON.stringify(data)}`);
     return data?.choices?.[0]?.message?.content ?? null;
   }
 
@@ -204,12 +241,37 @@ async function callLlm(cfg: AnalysisConfig, prompt: string): Promise<string | nu
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({ model: cfg.model, max_tokens: 300, messages: [{ role: "user", content: prompt }] }),
+      signal: AbortSignal.timeout(LLM_FETCH_TIMEOUT_MS),
     });
     const data = await res.json() as { content?: Array<{ text?: string }> };
+    if (!res.ok) throw new Error(`Anthropic API error ${res.status}: ${JSON.stringify(data)}`);
     return data?.content?.[0]?.text ?? null;
   }
 
   return null;
+}
+
+// Single-generation rotation: renames the file aside once it crosses the size
+// cap. Called at gateway_start rather than per-write, so it doesn't add a
+// stat() call to every single log line on a busy gateway.
+const MAX_LOG_BYTES = 20 * 1024 * 1024;
+function rotateLogIfLarge(path: string): void {
+  try {
+    if (statSync(path).size > MAX_LOG_BYTES) renameSync(path, `${path}.1`);
+  } catch { /* file doesn't exist yet — nothing to rotate */ }
+}
+
+// Snapshots have no natural expiry, so cap the count and drop the oldest.
+const MAX_SNAPSHOTS = 1000;
+function pruneSnapshots(dir: string, keep: number): void {
+  try {
+    const files = readdirSync(dir)
+      .map(f => ({ f, mtime: statSync(join(dir, f)).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime);
+    for (const { f } of files.slice(keep)) {
+      try { unlinkSync(join(dir, f)); } catch { }
+    }
+  } catch { }
 }
 
 export default definePluginEntry({
@@ -298,7 +360,29 @@ export default definePluginEntry({
       return { taskContext, historyContext, reasoningContext };
     }
 
+    // Resolved once and reused by gateway_start's boot message and by
+    // notifyBlocked below, so live block events can reach the operator too.
+    const telegramCfg = (api.config as Record<string, unknown>)?.channels as Record<string, unknown> | undefined;
+    const telegram = (telegramCfg?.telegram as Record<string, unknown>) ?? undefined;
+    const telegramBotToken = resolveSecretInputBestEffort(telegram?.botToken);
+    const telegramChatId = (telegram?.allowFrom as string[] | undefined)?.[0];
+    if (telegram?.botToken && !telegramBotToken) {
+      console.warn("[nancy] ⚠️  telegram.botToken is a secret reference NanCy could not resolve (only source:\"env\" refs are supported) — Telegram alerts disabled");
+    }
+
+    // Live notification for actual blocks (not every CLARIFY/requireApproval,
+    // which already surfaces through the approval UI itself where configured).
+    function notifyBlocked(text: string): void {
+      if (telegramBotToken && telegramChatId) {
+        telegramAlert(telegramBotToken, telegramChatId, `🛑 *NanCy blocked an action*\n${text}`).catch(() => { });
+      }
+    }
+
     api.on("gateway_start", (_event, _ctx) => {
+      rotateLogIfLarge(logFile);
+      rotateLogIfLarge(analysisLog);
+      pruneSnapshots(snapshotsDir, MAX_SNAPSHOTS);
+
       appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "nancy_started" }) + "\n");
 
       const writable = defaultPaths.PROTECTED_FILES.filter(f => isWritable(f.path));
@@ -314,23 +398,14 @@ export default definePluginEntry({
         console.warn("[nancy] ⚠️  analysis is not configured — security analysis disabled");
       }
 
-      const cfg = api.config as Record<string, unknown>;
-      const telegram = (cfg?.channels as Record<string, unknown>)?.telegram as Record<string, unknown> | undefined;
-      const botToken = resolveSecretInputBestEffort(telegram?.botToken);
-      const chatId = (telegram?.allowFrom as string[] | undefined)?.[0];
-
-      if (telegram?.botToken && !botToken) {
-        console.warn("[nancy] ⚠️  telegram.botToken is a secret reference NanCy could not resolve (only source:\"env\" refs are supported) — boot alert skipped");
-      }
-
-      if (botToken && chatId) {
+      if (telegramBotToken && telegramChatId) {
         const statusLine = writable.length > 0
           ? `⚠️ *SECURITY WARNING*: unprotected files: ${writable.map(f => f.label).join(", ")}`
           : `✅ Protected files are read-only`;
         const analysisStatus = nancyConfig.analysis
           ? `✅ Analysis: ${nancyConfig.analysis.provider}/${nancyConfig.analysis.model}`
           : `⚠️ Analysis: not configured`;
-        telegramAlert(botToken, chatId, `🛡 *NanCy online*\n${statusLine}\n${analysisStatus}`).catch(() => {});
+        telegramAlert(telegramBotToken, telegramChatId, `🛡 *NanCy online*\n${statusLine}\n${analysisStatus}`).catch(() => { });
       }
     });
 
@@ -366,7 +441,15 @@ export default definePluginEntry({
         if (!ctx.sessionKey) {
           console.warn(`[nancy] ⚠️  confirmation request seen with no sessionKey to correlate a reply against — ignoring`);
         } else {
-          pendingConfirmations.set(ctx.sessionKey, { ...confirmationRequest, ts: Date.now() });
+          const existing = pendingConfirmations.get(ctx.sessionKey);
+          if (existing) {
+            console.warn(`[nancy] confirmation id=${existing.id} superseded by a new request (id=${confirmationRequest.id}) before it was answered`);
+            appendFileSync(logFile, JSON.stringify({ ts, event: "confirmation_superseded", sessionKey: ctx.sessionKey, previousId: existing.id, newId: confirmationRequest.id }) + "\n");
+          }
+          // rawContent/messageId let message_sent (below) and message_received
+          // correlate the eventual reply to this exact delivered message, not
+          // just to "some reply in the same session" — see message_received.
+          pendingConfirmations.set(ctx.sessionKey, { ...confirmationRequest, ts: Date.now(), rawContent: content });
           console.log(`[nancy] confirmation requested: id=${confirmationRequest.id}`);
           appendFileSync(logFile, JSON.stringify({ ts, event: "confirmation_requested", sessionKey: ctx.sessionKey, id: confirmationRequest.id, description: confirmationRequest.description }) + "\n");
         }
@@ -407,11 +490,23 @@ Use BLOCK when the message contains data or requests that were not authorized by
           // uncertain CLARIFY is treated the same as BLOCK rather than let through.
           console.warn(`[nancy] 🛑 BLOCKED outbound message (${verdict}): ${reason}`);
           appendFileSync(logFile, JSON.stringify({ ts, event: "message_blocked", verdict, channel: ctx.channelId ?? "unknown", to: event.to, reason }) + "\n");
+          notifyBlocked(`Outbound message to ${event.to} via ${ctx.channelId ?? "unknown"}: ${reason}`);
           return { cancel: true, cancelReason: reason || "NanCy blocked this message: it did not match the confirmed task." };
         }
       } catch (err) {
         appendFileSync(analysisLog, JSON.stringify({ ts, event: "message_sending", error: String(err) }) + "\n");
         console.warn(`[nancy] ⚠️  outbound message analysis failed, allowing it through (fail-open, no approval path exists here): ${String(err)}`);
+      }
+    });
+
+    // Captures the delivered messageId for a just-sent confirmation request, so
+    // message_received below can require a strict reply-to-that-message match
+    // on channels that support threading, instead of only session+TTL.
+    api.on("message_sent", (event, ctx) => {
+      if (!event.success || !ctx.sessionKey || !event.messageId) return;
+      const pending = pendingConfirmations.get(ctx.sessionKey);
+      if (pending && !pending.messageId && event.content === pending.rawContent) {
+        pending.messageId = event.messageId;
       }
     });
 
@@ -426,6 +521,14 @@ Use BLOCK when the message contains data or requests that were not authorized by
       if (!ctx.sessionKey) return;
       const pending = pendingConfirmations.get(ctx.sessionKey);
       if (!pending) return;
+
+      // When both sides carry reply-threading info, require an exact match —
+      // an explicit reply to some other message is not a confirmation reply,
+      // even if it happens to be a bare "y". Channels/replies without
+      // threading info fall back to session+TTL correlation below, unchanged.
+      if (pending.messageId && event.replyToId !== undefined && String(event.replyToId) !== String(pending.messageId)) {
+        return;
+      }
       pendingConfirmations.delete(ctx.sessionKey);
 
       if (Date.now() - pending.ts > CONFIRMATION_TTL_MS) {
@@ -463,8 +566,10 @@ Use BLOCK when the message contains data or requests that were not authorized by
     // Rolling buffer of recent agent reasoning (Claude thinking blocks via message_sending)
     const recentReasoning: Array<{ ts: string; text: string }> = [];
 
-    // Confirmation requests sent to the user, awaiting their y/n reply, keyed by sessionKey
-    const pendingConfirmations = new Map<string, { id: string; description: string; ts: number }>();
+    // Confirmation requests sent to the user, awaiting their y/n reply, keyed by
+    // sessionKey. rawContent/messageId (set once message_sent confirms delivery)
+    // enable strict reply-to-message correlation on channels that support it.
+    const pendingConfirmations = new Map<string, { id: string; description: string; ts: number; rawContent: string; messageId?: string }>();
     const CONFIRMATION_TTL_MS = 15 * 60 * 1000;
 
     // Tool names verified against openclaw@2026.9.3's own source (web_form_submit,
@@ -512,6 +617,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
         const reason = `NanCy blocks all writes to protected file: ${protectedLabel}`;
         console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: ${reason}`);
         appendFileSync(logFile, JSON.stringify({ ts, event: "blocked_protected_write", toolName: event.toolName, file: protectedLabel }) + "\n");
+        notifyBlocked(`${event.toolName}: ${reason}`);
         return { block: true, blockReason: reason };
       }
 
@@ -523,6 +629,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
         if (domainBlockReason) {
           console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: ${domainBlockReason}`);
           appendFileSync(logFile, JSON.stringify({ ts, event: "domain_blocked", toolName: event.toolName, url: candidateUrl, reason: domainBlockReason }) + "\n");
+          notifyBlocked(`${event.toolName}: ${domainBlockReason}`);
           return { block: true, blockReason: domainBlockReason };
         }
       }
@@ -550,9 +657,9 @@ Use BLOCK when the message contains data or requests that were not authorized by
         const snapshot = await fetchBrowserSnapshot(port, nancyConfig.browser?.token);
         if (snapshot) {
           snapshotContext = `Current browser state (what the agent sees before this action): ${snapshot.slice(0, 4000)}. `;
-          const fname = snapshotFilename(event.params);
-          writeFileSync(join(snapshotsDir, fname), snapshot);
-          appendFileSync(analysisLog, JSON.stringify({ ts, event: "browser_snapshot", file: fname, chars: snapshot.length }) + "\n");
+          const snapshotPath = uniqueSnapshotPath(snapshotsDir, snapshotFilename(event.params));
+          writeFileSync(snapshotPath, snapshot);
+          appendFileSync(analysisLog, JSON.stringify({ ts, event: "browser_snapshot", file: snapshotPath.slice(snapshotsDir.length + 1), chars: snapshot.length }) + "\n");
         }
       }
 
@@ -574,6 +681,7 @@ Use BLOCK when the action clearly contradicts or exceeds the confirmed task, or 
         if (verdict === "block") {
           console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: ${reason}`);
           appendFileSync(logFile, JSON.stringify({ ts, event: "blocked", toolName: event.toolName, reason }) + "\n");
+          notifyBlocked(`${event.toolName}: ${reason}`);
           return { block: true, blockReason: reason || "NanCy blocked this action: it did not match the confirmed task." };
         }
 
@@ -613,10 +721,10 @@ Use BLOCK when the action clearly contradicts or exceeds the confirmed task, or 
         && String((event.params as Record<string, unknown>)?.command ?? "") === "submit";
       if (!WEB_SNAPSHOT_TOOLS.has(event.toolName) && !isBrowserSubmit) return;
       const ts = new Date().toISOString();
-      const fname = snapshotFilename(event.params);
       const content = JSON.stringify({ ts, toolName: event.toolName, params: event.params, result: (event as Record<string, unknown>).result ?? null }, null, 2);
-      writeFileSync(join(snapshotsDir, fname), content);
-      appendFileSync(analysisLog, JSON.stringify({ ts, event: "web_snapshot", file: fname }) + "\n");
+      const snapshotPath = uniqueSnapshotPath(snapshotsDir, snapshotFilename(event.params));
+      writeFileSync(snapshotPath, content);
+      appendFileSync(analysisLog, JSON.stringify({ ts, event: "web_snapshot", file: snapshotPath.slice(snapshotsDir.length + 1) }) + "\n");
     });
   },
 });
