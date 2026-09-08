@@ -82,7 +82,7 @@ In the NanCy SSIL framework, it is perfectly acceptable—and often encouraged�
 ## Getting Started
 
 > [!WARNING]
-> Use only for research and development. NanCy's protection hasn't been activated yet.
+> Use only for research and development. NanCy can now block or pause tool calls that fail its intent analysis (when `analysis` is configured), but this enforcement is new, unaudited, and only as reliable as the underlying LLM's judgment — do not rely on it for production safety yet.
 
 ### Prerequisites
 
