@@ -22,40 +22,40 @@ The mission of NanCy SSIL is to transform OpenClaw from a high-risk experimental
 
 The fundamental innovation of NanCy SSIL revolves around a single, unbreakable loop: **Intent Anchoring.**
 
-Before any autonomous session begins, the system captures, confirms and "locks" the user’s explicit intent. This intent serves as the immutable Source of Truth for the entire session.
+Before any autonomous session begins, the user's explicit intent is captured, confirmed and "locked" as the Source of Truth for the session. In this repository, that capture-and-confirm step is carried out by the *agent itself*, following the protocol NanCy asks you to add to `AGENTS.md` (see [Getting Started §3](#3-add-task-confirmation-rules-to-your-agent)); NanCy's own role is to make that instruction file read-only (so the agent can't remove the requirement, see feature #6) and to read the resulting confirmation record as the anchor for the checks below.
 
 While the primary Agent (OpenClaw) may be susceptible to "intent drift," hallucinations, or prompt injection, NanCy acts as an **external, stateless observer.** It cross-references every critical action—such as submitting a purchase form or sending an outgoing email—against the anchored intent. If the action does not perfectly align with the original goal, NanCy pulls the plug. All other security features in this framework are built to support and enforce this verification process.
 
 
 ## Key Technical Features
 
-### 1. Stateless Security Interruption Layer (SSIL)
+This section separates what actually runs today (✅, in `src/index.ts`) from what is still a design goal (🧭, not in this repository yet). Check the code before relying on any of it — this is early-stage software.
 
-Unlike the agent, NanCy has no "memory" of previous agent persuasions. It treats every action as a fresh request, making it immune to social engineering or "gaslighting" by a compromised LLM.
+### 1. Stateless Security Interruption Layer (SSIL) ✅
 
-### 2. Intent Confirmation & Gap Detection
+Each tool call is judged by a fresh, one-shot LLM request with no persisted conversation of its own — the analysis model can't be talked around turn-by-turn the way a chatty, stateful guard could. It is given a snapshot of relevant facts (the confirmed task, recent tool calls, recent stated reasoning) as plain context in that single prompt, not a running relationship it can be "gaslit" into trusting.
 
-NanCy doesn't just watch; it communicates. Before execution, NanCy analyzes the agent's plan and highlights undefined variables or potential misunderstandings to the user, requiring explicit confirmation before proceeding.
+### 2. Intent Confirmation & Gap Detection 🧭 (partially agent-side)
 
-### 3. Domain Border Control
+NanCy itself does not analyze the agent's plan or flag undefined variables — there is no such code in this repository. Today, intent confirmation works as an **agent-side protocol**: the `AGENTS.md` snippet in [Getting Started §3](#3-add-task-confirmation-rules-to-your-agent) instructs the agent to ask the user for explicit confirmation and record it as `tasks/current.json`. NanCy's actual contribution is (a) making `AGENTS.md` read-only so the agent can't remove that requirement (see #6), and (b) reading the resulting confirmation record as the anchor for the checks in #1. Automated gap detection by NanCy is on the roadmap, not implemented.
 
-NanCy implements a strict Zero-Trust policy for web navigation. It verifies domains against free APIs (or optional whitelists) and intercepts traffic before the agent even reaches a site. Unsafe domains trigger an immediate process kill or a "Access Denied" sandboxed view.
+### 3. Domain Border Control 🧭
 
-### 4. Contextual Scrambler
+Not implemented in this repository. There is no domain allow/deny-listing and no interception of outbound web traffic before it reaches a site. Today the only web-related coverage is the general intent-alignment analysis applied to `web_fetch`/`web_form_submit`/browser tool calls (see #1), plus a snapshot written to disk after each web fetch/submit for later review.
 
-To prevent indirect prompt injections, NanCy "scrambles" the syntax of incoming data in certain situations. This blunts a possible prompt injection while still allowing NanCy to detect it.
+### 4. Contextual Scrambler 🧭
 
-This feature is powered by **[PIDD (Prompt Injection Disarming & Detection)](https://github.com/fxg55647/PIDD)** — a standalone library that splits untrusted input into character-based chunks with randomized boundaries, shuffles the words within each segment, and passes the result to a dedicated evaluation model. The evaluator returns `go`, `no`, or `clarify` without ever following the content it analyzes. PIDD can be used independently of NanCy in any LLM pipeline.
+Not implemented in this repository. **[PIDD (Prompt Injection Disarming & Detection)](https://github.com/fxg55647/PIDD)** is a separate, standalone library and this codebase does not currently call it. Wiring PIDD into NanCy's analysis pipeline is planned.
 
-### 5. DOM Biopsy
+### 5. DOM Biopsy ⚠️ (lighter than described)
 
-Before any interaction with a web element (for example form submits), NanCy performs a "biopsy" of the underlying HTML code to ensure the element’s true function matches the agent's reported intent.
+Before a browser-interact action (click, fill, submit, etc.), NanCy fetches a text snapshot of the current page and includes it as context in the same general intent-analysis prompt used for every tool call (see #1) — so the analysis model sees what the agent sees before deciding. This is not a dedicated, element-level parse of the underlying HTML to verify a specific element's true function; it's the same page-level context mechanism applied to browser actions.
 
-### 6. Write-Protection for Core Configuration
+### 6. Write-Protection for Core Configuration ✅
 
-To prevent "Self-Poisoning," the agent is strictly forbidden from writing to or modifying any files related to its own behavior, logic, or security protocols. This ensures the agent cannot rewrite its own "personality" or disable NanCy's surveillance.
+NanCy actively blocks any `write`/`write_file` tool call whose target path resolves to `AGENTS.md`, `IDENTITY.md`, `MEMORY.md`, or NanCy's own `src/index.ts` / `openclaw.plugin.json` — this block is unconditional and does not depend on the LLM analysis being configured or correct. Separately, at startup NanCy also audits whether these files are OS-writable and warns if they are (`chmod`-level protection is still recommended as defense in depth, since the audit only warns and doesn't itself change file permissions).
 
-### 7. Stated-Reasoning Context
+### 7. Stated-Reasoning Context ✅
 
 NanCy has no access to a model's hidden internal reasoning — most providers don't expose it, and NanCy makes no claim to read it. When the agent explicitly shares its reasoning in an outgoing message (prefixed with `Reasoning:`), NanCy keeps the last few such statements and feeds them as extra context into the analysis of the agent's next tool calls. If that stated reasoning points toward an unauthorized action, NanCy can block or require approval for the next tool call — it does not terminate the session outright, and it has no visibility into reasoning the agent never states out loud.
 
@@ -82,7 +82,7 @@ In the NanCy SSIL framework, it is perfectly acceptable—and often encouraged�
 ## Getting Started
 
 > [!WARNING]
-> Use only for research and development. NanCy can now block or pause tool calls that fail its intent analysis (when `analysis` is configured), but this enforcement is new, unaudited, and only as reliable as the underlying LLM's judgment — do not rely on it for production safety yet.
+> Use only for research and development. NanCy can block or pause tool calls that fail its intent analysis (when `analysis` is configured) and always blocks writes to its own protected files, but several features described above are not implemented yet — see the ✅/🧭 status markers in [Key Technical Features](#key-technical-features) — and the enforcement that does exist is new, unaudited, and only as reliable as the underlying LLM's judgment. Do not rely on it for production safety yet.
 
 ### Prerequisites
 

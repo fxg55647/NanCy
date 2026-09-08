@@ -1,6 +1,6 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { appendFileSync, readFileSync, readdirSync, statSync, accessSync, constants, mkdirSync, writeFileSync } from "fs";
-import { join } from "path";
+import { join, resolve } from "path";
 
 function isWritable(filePath: string): boolean {
   try { accessSync(filePath, constants.W_OK); return true; }
@@ -132,17 +132,31 @@ export default definePluginEntry({
     // api.pluginConfig holds plugins.entries.nancy.config — distinct from api.config (full openclaw config)
     const nancyConfig = api.pluginConfig as NancyConfig;
 
+    // Shared across gateway_start (OS-permission audit) and before_tool_call (active block)
+    const workspaceDir = api.runtime.agent.resolveAgentWorkspaceDir(api.config);
+    const PROTECTED_FILES = [
+      { label: "AGENTS.md", path: join(workspaceDir, "AGENTS.md") },
+      { label: "IDENTITY.md", path: join(workspaceDir, "IDENTITY.md") },
+      { label: "MEMORY.md", path: join(workspaceDir, "MEMORY.md") },
+      { label: "nancy/src/index.ts", path: join(api.rootDir ?? ".", "src", "index.ts") },
+      { label: "nancy/openclaw.plugin.json", path: join(api.rootDir ?? ".", "openclaw.plugin.json") },
+    ];
+    const PROTECTED_PATHS = new Map(PROTECTED_FILES.map(f => [resolve(f.path), f.label]));
+
+    function protectedWriteTarget(event: { params: unknown; derivedPaths?: readonly string[] }): string | null {
+      const candidates: string[] = [];
+      const p = (event.params as Record<string, unknown>)?.path;
+      if (typeof p === "string") candidates.push(p);
+      if (Array.isArray(event.derivedPaths)) candidates.push(...event.derivedPaths);
+      for (const c of candidates) {
+        const label = PROTECTED_PATHS.get(resolve(workspaceDir, c));
+        if (label) return label;
+      }
+      return null;
+    }
+
     api.on("gateway_start", (_event, _ctx) => {
       appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "nancy_started" }) + "\n");
-
-      const workspaceDir = api.runtime.agent.resolveAgentWorkspaceDir(api.config);
-      const PROTECTED_FILES = [
-        { label: "AGENTS.md", path: join(workspaceDir, "AGENTS.md") },
-        { label: "IDENTITY.md", path: join(workspaceDir, "IDENTITY.md") },
-        { label: "MEMORY.md", path: join(workspaceDir, "MEMORY.md") },
-        { label: "nancy/src/index.ts", path: join(api.rootDir ?? ".", "src", "index.ts") },
-        { label: "nancy/openclaw.plugin.json", path: join(api.rootDir ?? ".", "openclaw.plugin.json") },
-      ];
 
       const writable = PROTECTED_FILES.filter(f => isWritable(f.path));
       if (writable.length > 0) {
@@ -249,6 +263,16 @@ export default definePluginEntry({
       recentCalls.push({ ts, toolName: event.toolName, params: event.params });
       if (recentCalls.length > 20) recentCalls.shift();
 
+      // Hard block, independent of LLM analysis: the agent must never be able to
+      // rewrite its own instructions, identity, memory, or NanCy's own code/config.
+      const protectedLabel = protectedWriteTarget(event);
+      if (protectedLabel) {
+        const reason = `NanCy blocks all writes to protected file: ${protectedLabel}`;
+        console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: ${reason}`);
+        appendFileSync(logFile, JSON.stringify({ ts, event: "blocked_protected_write", toolName: event.toolName, file: protectedLabel }) + "\n");
+        return { block: true, blockReason: reason };
+      }
+
       if (!shouldAnalyze(event.toolName, event.params)) return;
 
       const analysisCfg = nancyConfig.analysis;
@@ -268,7 +292,6 @@ export default definePluginEntry({
 
       let currentTask: unknown = null;
       try {
-        const workspaceDir = api.runtime.agent.resolveAgentWorkspaceDir(api.config);
         const tasksDir = join(workspaceDir, "tasks");
         let taskFile: string | null = null;
         try {
