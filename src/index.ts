@@ -1006,7 +1006,16 @@ Use BLOCK when the message contains data or requests that were not authorized by
         const reason = `NanCy blocks all writes to protected file: ${protectedLabel}`;
         console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: ${reason}`);
         appendFileSync(logFile, JSON.stringify({ ts, event: "blocked_protected_write", toolName: event.toolName, file: protectedLabel }) + "\n");
-        notifyBlocked(`${event.toolName}: ${reason}`, `${sessionKey}:protected:${event.toolName}`);
+        // The tasks/ case is routine, not alarming: the agent (correctly)
+        // never writes there per its own instructions, but a model that
+        // doesn't stop cleanly after sending a confirmation will sometimes
+        // still try, out of habit, to do NanCy's own bookkeeping. That's
+        // expected friction, fully logged, and not a self-poisoning attempt —
+        // unlike a write to AGENTS.md/IDENTITY.md/MEMORY.md/NanCy's own code,
+        // which genuinely warrants a live alert.
+        if (!protectedLabel.startsWith("tasks/")) {
+          notifyBlocked(`${event.toolName}: ${reason}`, `${sessionKey}:protected:${event.toolName}`);
+        }
         return { block: true, blockReason: reason };
       }
 
