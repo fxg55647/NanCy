@@ -1,2 +1,3 @@
 *.log
 snapshots/
+node_modules/

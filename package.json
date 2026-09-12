@@ -3,6 +3,18 @@
   "version": "0.1.0",
   "type": "module",
   "openclaw": {
-    "extensions": ["./src/index.ts"]
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "check": "npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.2",
+    "openclaw": "^2026.9.4",
+    "typescript": "^7.0.2"
   }
 }

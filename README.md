@@ -33,7 +33,7 @@ This section separates what actually runs today (✅, in `src/index.ts`) from wh
 
 ### 1. Stateless Security Interruption Layer (SSIL) ✅
 
-Each tool call — and each outbound message the agent sends through any channel — is judged by a fresh, one-shot LLM request with no persisted conversation of its own — the analysis model can't be talked around turn-by-turn the way a chatty, stateful guard could. It is given a snapshot of relevant facts (the confirmed task, recent tool calls, recent stated reasoning) as plain context in that single prompt, not a running relationship it can be "gaslit" into trusting. Covering outbound messages, not just tool calls, matters because some channels (email via OpenClaw's `imap` extension, for one) dispatch content through message delivery rather than a distinct tool — `before_tool_call` alone would never see it. The only interactive decision in the whole flow is the one task confirmation (feature #2) — an uncertain CLARIFY verdict, for a tool call or an outbound message, is always treated as BLOCK rather than pausing to ask again, since native pause-for-approval delivery isn't available on every channel. Tool-call analysis failures fail *closed* (the action is blocked); outbound-message analysis failures fail *open* (the message still sends), since muting the agent's replies entirely isn't a graceful fallback either.
+Each tool call — and each outbound message the agent sends through any channel — is judged by a fresh, one-shot LLM request with no persisted conversation of its own — the analysis model can't be talked around turn-by-turn the way a chatty, stateful guard could. It is given a bounded snapshot of relevant facts (the confirmed task and recent tool calls) as plain context in that single prompt, not a running relationship it can be "gaslit" into trusting. Covering outbound messages, not just tool calls, matters because some channels (email via OpenClaw's `imap` extension, for one) dispatch content through message delivery rather than a distinct tool — `before_tool_call` alone would never see it. The only interactive decision in the whole flow is the one task confirmation (feature #2) — an uncertain CLARIFY verdict, for a tool call or an outbound message, is always treated as BLOCK rather than pausing to ask again, since native pause-for-approval delivery isn't available on every channel. Tool-call analysis failures fail *closed* (the action is blocked); outbound-message analysis failures fail *open* (the message still sends), since muting the agent's replies entirely isn't a graceful fallback either.
 
 ### 2. Intent Confirmation & Gap Detection ✅ confirmation / 🧭 gap detection
 
@@ -52,7 +52,9 @@ There is no network-level interception or process kill — like every other NanC
 
 ### 4. Contextual Scrambler 🧭
 
-Not implemented in this repository. **[PIDD (Prompt Injection Disarming & Detection)](https://github.com/fxg55647/PIDD)** is a separate, standalone library and this codebase does not currently call it. Wiring PIDD into NanCy's analysis pipeline is planned.
+Not implemented in this repository. NanCy currently has no dedicated protection against prompt injection aimed at its own reviewer model. Its fresh, stateless and deliberately bounded analysis prompts reduce the opportunity for a persistent compromise, but untrusted content included in an analysis prompt can still influence the reviewer. For now the design relies on that limited exposure and on using a reviewer model that is different from the main agent; neither is a security guarantee.
+
+A dedicated prompt-injection defense for the reviewer is planned for a later release.
 
 ### 5. DOM Biopsy ⚠️ (lighter than described)
 
@@ -64,15 +66,11 @@ For `fill`/`type`/`select` specifically — the browser commands whose params ca
 
 NanCy actively blocks any `write` or `edit` tool call whose target path resolves to `AGENTS.md`, `IDENTITY.md`, `MEMORY.md`, NanCy's own `src/index.ts` / `openclaw.plugin.json`, or anywhere under `tasks/` (now written exclusively by NanCy itself, see #2) — this block is unconditional and does not depend on the LLM analysis being configured or correct. Separately, at startup NanCy also audits whether the individual protected files are OS-writable and warns if they are (`chmod`-level protection is still recommended as defense in depth, since the audit only warns and doesn't itself change file permissions).
 
-### 7. Stated-Reasoning Context ✅
-
-NanCy has no access to a model's hidden internal reasoning — most providers don't expose it, and NanCy makes no claim to read it. When the agent explicitly shares its reasoning in an outgoing message (prefixed with `Reasoning:`), NanCy keeps the last few such statements and feeds them as extra context into the analysis of the agent's next tool calls. If that stated reasoning points toward an unauthorized action, NanCy can block or require approval for the next tool call — it does not terminate the session outright, and it has no visibility into reasoning the agent never states out loud.
-
-### 8. Main/Worker Session Split ✅ (optional)
+### 7. Main/Worker Session Split ✅ (optional)
 
 When `mainSessionKey` is configured, that session is locked to passive reads — `write`, `edit`, `exec`/`shell`/`bash`, and the interactive browser commands are blocked outright, independent of LLM analysis. Real work happens only once a task is confirmed (feature #2): NanCy then spawns a dedicated worker session (`agent:<workerAgentId>:task-<id>`) to execute it, and deletes that session once the run finishes so one task's context can never bleed into the next. The main session itself is also reset after `mainSessionIdleMinutes` of inactivity (default 60), so it can't silently accumulate injected context over an unbounded chat. Without `mainSessionKey` set, this split is disabled and every session is treated the same way.
 
-### 9. Behavioral Review & Session Termination ✅
+### 8. Behavioral Review & Session Termination ✅
 
 Every 10 tool calls, NanCy runs a separate, session-level review over the recent call history — looking for *patterns* a single-call verdict can't see: loops, slow privilege escalation, repeated blocked attempts, a sustained attempt to bypass NanCy's own checks. This is additional to, not a replacement for, the per-call ALLOW/BLOCK/CLARIFY checks in feature #1. Only this behavioral review can terminate a session outright (`terminate` verdict) — once terminated, every subsequent tool call in that session is blocked unconditionally, regardless of what it is.
 
@@ -169,7 +167,7 @@ Add the plugin path to the `plugins.load.paths` array and enable it under `plugi
 
 #### Reviewer model independence
 
-`analysis` is entirely separate from whatever model runs the main OpenClaw agent — set here in `plugins.entries.nancy.config`, and never read from the agent's own model config. Pick any provider/model combination independent of the main agent's, which the [AI-control literature](./RELATED-WORK.md) recommends specifically to avoid the reviewer sharing the agent's blind spots. At startup NanCy makes a best-effort check (string comparison, not authoritative — model-ref naming isn't standardized) and logs a warning if `analysis.model` appears to match the main agent's configured model.
+`analysis` is entirely separate from whatever model runs the main OpenClaw agent — set here in `plugins.entries.nancy.config`, and never read from the agent's own model config. Use a different model, preferably from a different model family or provider, for NanCy and the main agent. This reduces correlated blind spots and makes it less likely that the same prompt injection works against both models, although it does not make the reviewer immune to prompt injection. The [AI-control literature](./RELATED-WORK.md) likewise recommends an independent reviewer. At startup NanCy makes a best-effort check (string comparison, not authoritative — model-ref naming isn't standardized) and logs a warning if `analysis.model` appears to match the main agent's configured model.
 
 #### Domain Border Control (optional)
 
@@ -187,7 +185,7 @@ Add a `domains` block next to `analysis` to allow/deny specific domains for `web
 
 #### Main/Worker Session Split (optional)
 
-Add `mainSessionKey`, and optionally `mainSessionIdleMinutes`/`workerAgentId`, to lock the main chat session to passive reads and delegate real work to an isolated worker session per confirmed task (see [feature #8](#8-mainworker-session-split--optional)):
+Add `mainSessionKey`, and optionally `mainSessionIdleMinutes`/`workerAgentId`, to lock the main chat session to passive reads and delegate real work to an isolated worker session per confirmed task (see [feature #7](#7-mainworker-session-split--optional)):
 
 ```json
 "mainSessionKey": "main",

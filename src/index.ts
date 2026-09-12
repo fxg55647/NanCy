@@ -91,14 +91,29 @@ interface NancyConfig {
   // / nancy-analysis.log regardless of this setting — it only controls the
   // live phone notification. Default true.
   telegramAlerts?: boolean;
-  // Test/dry-run mode: every before_tool_call analysis (context-check and
-  // full-verdict) still runs and is fully logged exactly as normal, but no
-  // tool call is ever actually allowed to execute — a call that would have
-  // been ALLOWED, or that never needed analysis at all, is hard-blocked at
-  // the last moment instead, with the real verdict/reason recorded in the
-  // block message and in nancy.log/nancy-analysis.log. Lets a task be run
-  // against NanCy end-to-end (confirmation dance included) to see exactly
-  // what it would decide, with zero risk of a real side effect. Default false.
+  // Live Telegram push reporting the outcome of every confirmed task once its
+  // worker session finishes — success or failure — including the worker's
+  // own final reply text when it produced one. Independent of telegramAlerts
+  // (which covers blocks/termination/boot status only). Default true.
+  telegramTaskReports?: boolean;
+  // Test/dry-run mode: every analysis (before_tool_call's context-check and
+  // full-verdict, and message_sending's outbound-intent check) still runs and
+  // is fully logged exactly as normal, but no tool call ever actually
+  // executes and no outbound message is ever actually delivered — a call or
+  // message that would have been ALLOWED, or that never needed analysis at
+  // all, is hard-blocked/canceled at the last moment instead, with the real
+  // verdict/reason recorded in the block message and in
+  // nancy.log/nancy-analysis.log. The ONE exception is NanCy's own
+  // fixed-format confirmation-request prompt (see parseConfirmationRequest):
+  // it is always sent for real, in test mode or not, because it's the only
+  // way to drive the confirm/deny dance end-to-end, it's a rigid
+  // NanCy-recognized template rather than arbitrary agent-authored content,
+  // and it is sent for real in production too — so exempting it adds no new
+  // real-world exposure test mode wouldn't already have. Every other
+  // outbound send — including the "analysis not configured" and
+  // "analysis failed" cases, which normally fail open — is dry-run only.
+  // Lets a task be run against NanCy end-to-end to see exactly what it would
+  // decide. Default false.
   testMode?: boolean;
 }
 
@@ -106,7 +121,15 @@ interface NancyConfig {
 // worker sessions. Cast from api.runtime, which doesn't type this publicly.
 type SubagentRuntime = {
   run: (p: { sessionKey: string; message: string; idempotencyKey?: string }) => Promise<{ runId: string }>;
-  waitForRun: (p: { runId: string; timeoutMs?: number }) => Promise<{ status: "ok" | "error" | "timeout"; error?: string }>;
+  waitForRun: (p: { runId: string; timeoutMs?: number }) => Promise<{
+    status: "ok" | "error" | "timeout" | "pending";
+    error?: string;
+    // Present when the worker's own agent turn produced a normal visible
+    // reply — its actual final text, not just a status code. Absent (or a
+    // non-"visible" disposition) when the run ended silently, empty, or via
+    // an error path instead.
+    terminalReply?: { disposition: "visible"; text: string } | { disposition: "silent" | "empty" };
+  }>;
   deleteSession: (p: { sessionKey: string; deleteTranscript?: boolean }) => Promise<void>;
 };
 
@@ -396,6 +419,17 @@ function rotateLogIfLarge(path: string): void {
   } catch { /* file doesn't exist yet — nothing to rotate */ }
 }
 
+// Every decision/log line below is tagged with these four correlation ids —
+// without them, a busy gateway running multiple sessions/workers concurrently
+// makes it impossible to tell which call a given block or verdict belonged to.
+// sessionKey/runId/toolCallId come from the hook's own ctx/event (undefined
+// where the hook type doesn't carry one, e.g. runId on message_sending);
+// taskId is the currently-confirmed task, if any (see getCurrentTask).
+type LogIds = { sessionKey?: string; runId?: string; toolCallId?: string; taskId?: string };
+function logDecision(file: string, ts: string, event: string, ids: LogIds, extra: Record<string, unknown> = {}): void {
+  appendFileSync(file, JSON.stringify({ ts, event, ...ids, ...extra }) + "\n");
+}
+
 // Snapshots have no natural expiry, so cap the count and drop the oldest.
 const MAX_SNAPSHOTS = 1000;
 function pruneSnapshots(dir: string, keep: number): void {
@@ -490,19 +524,27 @@ export default definePluginEntry({
     // if nothing were confirmed, the same as if current.json didn't exist.
     const CONFIRMED_TASK_MAX_AGE_MS = 4 * 60 * 60 * 1000;
 
+    // Reads tasks/current.json for the given agent's workspace, honoring the
+    // same max-age cutoff as buildAnalysisContext below. Split out so callers
+    // that only need the task id (e.g. for tagging log lines — see logDecision)
+    // don't have to go through the full prompt-context builder.
+    function getCurrentTask(paths: AgentPaths): { id?: string; ts?: string; description?: string } | null {
+      try {
+        const parsed = JSON.parse(readFileSync(join(paths.TASKS_DIR, "current.json"), "utf8")) as { id?: string; ts?: string; description?: string };
+        const taskAgeMs = parsed.ts ? Date.now() - new Date(parsed.ts).getTime() : NaN;
+        if (!Number.isNaN(taskAgeMs) && taskAgeMs <= CONFIRMED_TASK_MAX_AGE_MS) {
+          return parsed;
+        }
+      } catch { }
+      return null;
+    }
+
     // Shared by before_tool_call and message_sending for building the intent-
     // alignment prompt context (confirmed task, recent calls, recent reasoning).
     // sessionKey scopes recent-call/reasoning history to the calling session —
     // see recentCallsBySession/recentReasoningBySession above.
     function buildAnalysisContext(paths: AgentPaths, sessionKey: string | undefined, opts: { excludeMostRecentCall?: boolean } = {}) {
-      let currentTask: unknown = null;
-      try {
-        const parsed = JSON.parse(readFileSync(join(paths.TASKS_DIR, "current.json"), "utf8")) as { ts?: string };
-        const taskAgeMs = parsed.ts ? Date.now() - new Date(parsed.ts).getTime() : NaN;
-        if (!Number.isNaN(taskAgeMs) && taskAgeMs <= CONFIRMED_TASK_MAX_AGE_MS) {
-          currentTask = parsed;
-        }
-      } catch { }
+      const currentTask = getCurrentTask(paths);
       const allCalls = getRecentCalls(sessionKey);
       const calls = opts.excludeMostRecentCall ? allCalls.slice(0, -1) : allCalls;
       const reasoning = getRecentReasoning(sessionKey);
@@ -530,6 +572,16 @@ export default definePluginEntry({
     // to nancy.log/nancy-analysis.log regardless of this — it only gates the
     // live phone push. Explicit opt-out: telegramAlerts: false.
     const telegramAlertsEnabled = nancyConfig.telegramAlerts !== false && !!telegramBotToken && !!telegramChatId;
+    // Separate opt-out from telegramAlerts: an operator may want blocks/status
+    // pushes off (noisy) while still wanting to know how each confirmed task
+    // actually turned out.
+    const telegramTaskReportsEnabled = nancyConfig.telegramTaskReports !== false && !!telegramBotToken && !!telegramChatId;
+
+    // Telegram's message text cap is 4096 chars; leave headroom for the
+    // surrounding status/labels built around this text.
+    function truncateForTelegram(text: string, max: number): string {
+      return text.length > max ? `${text.slice(0, max)}…` : text;
+    }
 
     // Live notification for every block, including CLARIFY (which also fails
     // closed — see before_tool_call below for why it doesn't pause for
@@ -573,6 +625,13 @@ export default definePluginEntry({
       lastActivityMs.set(sessionKey, Date.now());
     }
 
+    // waitForRun is re-issued up to this many times (each with its own
+    // timeoutMs budget) before NanCy gives up waiting — see the "timeout"/
+    // "pending" handling below. Total worst-case wait: WORKER_WAIT_TIMEOUT_MS
+    // * WORKER_MAX_WAIT_ATTEMPTS.
+    const WORKER_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
+    const WORKER_MAX_WAIT_ATTEMPTS = 3;
+
     // Spawns an isolated worker session to execute a freshly confirmed task,
     // then deletes that session once the run finishes so its transcript can't
     // accumulate context across tasks (each task gets a clean session).
@@ -604,16 +663,54 @@ export default definePluginEntry({
         appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "worker_spawned", taskId, runId: result.runId, workerSessionKey }) + "\n");
         console.log(`[nancy] ✓ Worker spawned for task ${taskId} → runId ${result.runId}`);
 
-        subagent.waitForRun({ runId: result.runId, timeoutMs: 30 * 60 * 1000 })
-          .then(waitResult => {
-            appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "worker_done", taskId, runId: result.runId, status: waitResult.status }) + "\n");
-            return subagent.deleteSession({ sessionKey: workerSessionKey, deleteTranscript: false });
-          })
-          .then(() => {
+        (async () => {
+          // waitForRun returning "timeout" (or "pending") means the wait call
+          // itself gave up — it says nothing about whether the worker's run
+          // actually finished. Treating it as done and immediately deleting
+          // the session would tear down a run that's still genuinely in
+          // progress. There's no cancel/stop call on SubagentRuntime, so the
+          // only safe options are to keep waiting or to leave the session
+          // alone — never to clean up on the strength of a timeout alone.
+          let waitResult = await subagent.waitForRun({ runId: result.runId, timeoutMs: WORKER_WAIT_TIMEOUT_MS });
+          let attempt = 1;
+          while ((waitResult.status === "timeout" || waitResult.status === "pending") && attempt < WORKER_MAX_WAIT_ATTEMPTS) {
+            attempt++;
+            appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "worker_wait_retry", taskId, runId: result.runId, status: waitResult.status, attempt }) + "\n");
+            waitResult = await subagent.waitForRun({ runId: result.runId, timeoutMs: WORKER_WAIT_TIMEOUT_MS });
+          }
+
+          appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "worker_done", taskId, runId: result.runId, status: waitResult.status, attempts: attempt }) + "\n");
+
+          if (waitResult.status !== "ok" && waitResult.status !== "error") {
+            // Still not finished after WORKER_MAX_WAIT_ATTEMPTS rounds of
+            // waiting — leave the worker session in place rather than
+            // deleting it out from under a run that may still be executing.
+            console.warn(`[nancy] ⚠️  worker for task ${taskId} did not finish after extended waiting (status=${waitResult.status}) — leaving session ${workerSessionKey} in place, skipping cleanup`);
+            appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "worker_wait_exhausted", taskId, runId: result.runId, status: waitResult.status, workerSessionKey }) + "\n");
+            return;
+          }
+
+          if (telegramTaskReportsEnabled) {
+            const ok = waitResult.status === "ok";
+            const reply = waitResult.terminalReply;
+            const replyText = reply && reply.disposition === "visible" ? reply.text : null;
+            const lines = [
+              `${ok ? "✅" : "❌"} *NanCy: confirmed task ${ok ? "finished" : "failed"}*`,
+              `Task: ${truncateForTelegram(task.description, 300)}`,
+            ];
+            if (!ok && waitResult.error) lines.push(`Error: ${truncateForTelegram(waitResult.error, 300)}`);
+            lines.push(replyText ? truncateForTelegram(replyText, 3000) : "(worker produced no visible final reply)");
+            telegramAlert(telegramBotToken!, telegramChatId!, lines.join("\n\n")).catch(() => { });
+          }
+
+          try {
+            await subagent.deleteSession({ sessionKey: workerSessionKey, deleteTranscript: false });
             appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "worker_session_deleted", taskId, workerSessionKey }) + "\n");
             console.log(`[nancy] ✓ Worker session cleaned up for task ${taskId}`);
-          })
-          .catch((err: unknown) => appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "worker_cleanup_error", taskId, error: String(err) }) + "\n"));
+          } catch (err) {
+            appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "worker_cleanup_error", taskId, error: String(err) }) + "\n");
+          }
+        })().catch((err: unknown) => appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "worker_cleanup_error", taskId, error: String(err) }) + "\n"));
       } catch (err) {
         appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "worker_spawn_error", taskId, error: String(err) }) + "\n");
         console.warn(`[nancy] ⚠️  Failed to spawn worker for task ${taskId}: ${err}`);
@@ -765,16 +862,21 @@ Reply ONLY with valid JSON — no other text:
       const content = event.content ?? "";
       if (!content) return;
 
+      // ctx.runId is not currently populated for message_sending by the host
+      // (see PluginHookMessageContext.runId docs) — included anyway so logs
+      // pick it up automatically once/if that changes upstream.
+      const logIds: LogIds = { sessionKey: ctx.sessionKey, runId: ctx.runId, taskId: getCurrentTask(defaultPaths)?.id };
+
       const isReasoning = content.startsWith("Reasoning:");
       if (isReasoning) {
         const reasoningText = content.slice("Reasoning:".length).trim();
         console.log(`[nancy] reasoning: ${reasoningText.slice(0, 120).trim()}…`);
         pushRecentReasoning(ctx.sessionKey, { ts, text: reasoningText });
-        appendFileSync(analysisLog, JSON.stringify({ ts, event: "reasoning", text: content }) + "\n");
+        logDecision(analysisLog, ts, "reasoning", logIds, { text: content });
       } else {
         console.log(`[nancy] outbound: ${content.slice(0, 100).trim()}${content.length > 100 ? "…" : ""}`);
       }
-      appendFileSync(logFile, JSON.stringify({ ts, event: "message_sending", channel: ctx.channelId ?? "unknown", text: content, trigger: ctx.sessionKey ? sessionTriggerByKey.get(ctx.sessionKey) : undefined }) + "\n");
+      logDecision(logFile, ts, "message_sending", logIds, { channel: ctx.channelId ?? "unknown", text: content, trigger: ctx.sessionKey ? sessionTriggerByKey.get(ctx.sessionKey) : undefined });
 
       // Intent Anchoring: the agent only *asks* for confirmation — NanCy is the
       // one that decides, from the user's actual reply below, whether it was given.
@@ -786,14 +888,14 @@ Reply ONLY with valid JSON — no other text:
           const existing = pendingConfirmations.get(ctx.sessionKey);
           if (existing) {
             console.warn(`[nancy] confirmation id=${existing.id} superseded by a new request (id=${confirmationRequest.id}) before it was answered`);
-            appendFileSync(logFile, JSON.stringify({ ts, event: "confirmation_superseded", sessionKey: ctx.sessionKey, previousId: existing.id, newId: confirmationRequest.id }) + "\n");
+            logDecision(logFile, ts, "confirmation_superseded", logIds, { previousId: existing.id, newId: confirmationRequest.id });
           }
           // rawContent/messageId let message_sent (below) and message_received
           // correlate the eventual reply to this exact delivered message, not
           // just to "some reply in the same session" — see message_received.
           pendingConfirmations.set(ctx.sessionKey, { ...confirmationRequest, ts: Date.now(), rawContent: content });
           console.log(`[nancy] confirmation requested: id=${confirmationRequest.id}`);
-          appendFileSync(logFile, JSON.stringify({ ts, event: "confirmation_requested", sessionKey: ctx.sessionKey, id: confirmationRequest.id, description: confirmationRequest.description }) + "\n");
+          logDecision(logFile, ts, "confirmation_requested", logIds, { id: confirmationRequest.id, description: confirmationRequest.description });
         }
       }
 
@@ -814,7 +916,7 @@ Reply ONLY with valid JSON — no other text:
       if (!analysisCfg) {
         // message_sending has no requireApproval-style pause available (unlike
         // before_tool_call) — fail open here rather than muting the agent entirely.
-        appendFileSync(analysisLog, JSON.stringify({ ts, event: "message_sending", error: "analysis not configured" }) + "\n");
+        logDecision(analysisLog, ts, "analysis_not_configured", logIds, { error: "analysis not configured" });
         return;
       }
 
@@ -830,29 +932,43 @@ Use BLOCK when the message contains data or requests that were not authorized by
       try {
         const analysisText = await callLlm(analysisCfg, prompt);
         const { verdict, reason } = parseVerdict(analysisText);
-        appendFileSync(analysisLog, JSON.stringify({ ts, event: "message_sending", verdict, analysis: analysisText }) + "\n");
+        logDecision(analysisLog, ts, "message_sending_analysis", logIds, { verdict, analysis: analysisText });
 
         if (verdict === "block" || verdict === "clarify") {
           // No approval-request mechanism exists for message_sending, so an
           // uncertain CLARIFY is treated the same as BLOCK rather than let through.
           console.warn(`[nancy] 🛑 BLOCKED outbound message (${verdict}): ${reason}`);
-          appendFileSync(logFile, JSON.stringify({ ts, event: "message_blocked", verdict, channel: ctx.channelId ?? "unknown", to: event.to, reason }) + "\n");
+          logDecision(logFile, ts, "message_blocked", logIds, { verdict, channel: ctx.channelId ?? "unknown", to: event.to, reason });
           notifyBlocked(`Outbound message to ${event.to} via ${ctx.channelId ?? "unknown"}: ${reason}`, `${ctx.sessionKey ?? "unknown"}:message:${ctx.channelId ?? "unknown"}`);
           return { cancel: true, cancelReason: reason || "NanCy blocked this message: it did not match the confirmed task." };
         }
       } catch (err) {
-        appendFileSync(analysisLog, JSON.stringify({ ts, event: "message_sending", error: String(err) }) + "\n");
+        logDecision(analysisLog, ts, "message_sending_analysis_error", logIds, { error: String(err) });
         console.warn(`[nancy] ⚠️  outbound message analysis failed, allowing it through (fail-open, no approval path exists here): ${String(err)}`);
       }
     });
 
     // Captures the delivered messageId for a just-sent confirmation request, so
     // message_received below can require a strict reply-to-that-message match
-    // on channels that support threading, instead of only session+TTL.
+    // on channels that support threading, instead of only session+TTL. Also
+    // invalidates the pending confirmation outright when delivery failed: it
+    // was recorded in pendingConfirmations (see message_sending above) before
+    // the send was known to succeed, so a failed delivery would otherwise
+    // leave a confirmation the user never actually saw answerable by a later,
+    // unrelated "y" reply in the same session.
     api.on("message_sent", (event, ctx) => {
-      if (!event.success || !ctx.sessionKey || !event.messageId) return;
+      if (!ctx.sessionKey) return;
       const pending = pendingConfirmations.get(ctx.sessionKey);
-      if (pending && !pending.messageId && event.content === pending.rawContent) {
+      if (!pending || event.content !== pending.rawContent) return;
+
+      if (!event.success) {
+        pendingConfirmations.delete(ctx.sessionKey);
+        console.warn(`[nancy] confirmation id=${pending.id} delivery failed — invalidated (${event.error ?? "unknown error"})`);
+        logDecision(logFile, new Date().toISOString(), "confirmation_delivery_failed", { sessionKey: ctx.sessionKey, runId: ctx.runId }, { id: pending.id, error: event.error });
+        return;
+      }
+
+      if (!pending.messageId && event.messageId) {
         pending.messageId = event.messageId;
       }
     });
@@ -1047,7 +1163,13 @@ Use BLOCK when the message contains data or requests that were not authorized by
     api.on("before_tool_call", async (event, ctx) => {
       const ts = new Date().toISOString();
       const sessionKey = ctx.sessionKey ?? UNKNOWN_SESSION_KEY;
-      appendFileSync(logFile, JSON.stringify({ ts, event: "before_tool_call", sessionKey: ctx.sessionKey, runId: ctx.runId, toolName: event.toolName, params: event.params, trigger: sessionTriggerByKey.get(sessionKey) }) + "\n");
+      const agentPaths = getAgentPaths(ctx.agentId);
+      // Resolved once up front (rather than inline per log call) so every
+      // decision/log line for this call — block, clarify, or analysis error —
+      // carries the same sessionKey/runId/toolCallId/taskId, letting concurrent
+      // calls (parallel sessions, parallel workers) be told apart in the logs.
+      const logIds: LogIds = { sessionKey: ctx.sessionKey, runId: ctx.runId, toolCallId: ctx.toolCallId, taskId: getCurrentTask(agentPaths)?.id };
+      logDecision(logFile, ts, "before_tool_call", logIds, { toolName: event.toolName, params: event.params, trigger: sessionTriggerByKey.get(sessionKey) });
       touchActivity(sessionKey);
 
       // Hard block, independent of LLM analysis: once a session is terminated
@@ -1058,15 +1180,13 @@ Use BLOCK when the message contains data or requests that were not authorized by
 
       pushRecentCall(ctx.sessionKey, { ts, toolName: event.toolName, params: event.params });
 
-      const agentPaths = getAgentPaths(ctx.agentId);
-
       // Hard block, independent of LLM analysis: the agent must never be able to
       // rewrite its own instructions, identity, memory, or NanCy's own code/config.
       const protectedLabel = PATH_WRITE_TOOLS.has(event.toolName) ? protectedWriteTarget(event, agentPaths) : null;
       if (protectedLabel) {
         const reason = `NanCy blocks all writes to protected file: ${protectedLabel}`;
         console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: ${reason}`);
-        appendFileSync(logFile, JSON.stringify({ ts, event: "blocked_protected_write", toolName: event.toolName, file: protectedLabel }) + "\n");
+        logDecision(logFile, ts, "blocked_protected_write", logIds, { toolName: event.toolName, file: protectedLabel });
         // The tasks/ case is routine, not alarming: the agent (correctly)
         // never writes there per its own instructions, but a model that
         // doesn't stop cleanly after sending a confirmation will sometimes
@@ -1087,7 +1207,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
         const domainBlockReason = await checkDomainBorder(candidateUrl, nancyConfig.domains);
         if (domainBlockReason) {
           console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: ${domainBlockReason}`);
-          appendFileSync(logFile, JSON.stringify({ ts, event: "domain_blocked", toolName: event.toolName, url: candidateUrl, reason: domainBlockReason }) + "\n");
+          logDecision(logFile, ts, "domain_blocked", logIds, { toolName: event.toolName, url: candidateUrl, reason: domainBlockReason });
           notifyBlocked(`${event.toolName}: ${domainBlockReason}`, `${sessionKey}:domain:${event.toolName}`);
           return { block: true, blockReason: domainBlockReason };
         }
@@ -1116,7 +1236,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
             ? `'${event.toolName}' is not permitted for a cron-triggered run. Create a confirmed task first.`
             : `'${event.toolName}' is not permitted in the main session. Create a confirmed task first.`;
           console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: ${reason}`);
-          appendFileSync(logFile, JSON.stringify({ ts, event: "blocked_main_session", toolName: event.toolName, reason, trigger: cronRun ? "cron" : undefined }) + "\n");
+          logDecision(logFile, ts, "blocked_main_session", logIds, { toolName: event.toolName, reason, trigger: cronRun ? "cron" : undefined });
           return { block: true, blockReason: reason };
         }
         if (event.toolName === "browser") {
@@ -1126,7 +1246,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
               ? `Browser '${cmd}' is not permitted for a cron-triggered run. Create a confirmed task first.`
               : `Browser '${cmd}' is not permitted in the main session. Create a confirmed task first.`;
             console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: ${reason}`);
-            appendFileSync(logFile, JSON.stringify({ ts, event: "blocked_main_session", toolName: event.toolName, command: cmd, reason, trigger: cronRun ? "cron" : undefined }) + "\n");
+            logDecision(logFile, ts, "blocked_main_session", logIds, { toolName: event.toolName, command: cmd, reason, trigger: cronRun ? "cron" : undefined });
             return { block: true, blockReason: reason };
           }
         }
@@ -1136,7 +1256,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
         if (nancyConfig.testMode) {
           const reason = `[TEST MODE] '${event.toolName}' never requires analysis (always considered safe) and would have gone through. In test mode, no tool call is ever actually executed.`;
           console.warn(`[nancy] 🧪 TEST MODE — would ALLOW ${event.toolName} without analysis (never required it)`);
-          appendFileSync(logFile, JSON.stringify({ ts, event: "test_mode_would_allow", toolName: event.toolName, analyzed: false }) + "\n");
+          logDecision(logFile, ts, "test_mode_would_allow", logIds, { toolName: event.toolName, analyzed: false });
           return { block: true, blockReason: reason };
         }
         return;
@@ -1151,9 +1271,9 @@ Use BLOCK when the message contains data or requests that were not authorized by
         // here would hang or error instead of actually reaching a human. The
         // agent explains the block to the user in its own next reply.
         const reason = `${event.toolName}: security analysis is not configured, so NanCy cannot verify this action against the confirmed task.`;
-        appendFileSync(analysisLog, JSON.stringify({ ts, toolName: event.toolName, error: "analysis not configured" }) + "\n");
+        logDecision(analysisLog, ts, "analysis_not_configured", logIds, { toolName: event.toolName, error: "analysis not configured" });
         console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: analysis not configured`);
-        appendFileSync(logFile, JSON.stringify({ ts, event: "blocked_no_analysis", toolName: event.toolName }) + "\n");
+        logDecision(logFile, ts, "blocked_no_analysis", logIds, { toolName: event.toolName });
         notifyBlocked(reason, `${sessionKey}:no-analysis:${event.toolName}`);
         return { block: true, blockReason: reason };
       }
@@ -1166,7 +1286,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
           snapshotContext = `Current browser state (what the agent sees before this action): ${snapshot.slice(0, 4000)}. `;
           const snapshotPath = uniqueSnapshotPath(snapshotsDir, snapshotFilename(event.params));
           writeFileSync(snapshotPath, snapshot);
-          appendFileSync(analysisLog, JSON.stringify({ ts, event: "browser_snapshot", file: snapshotPath.slice(snapshotsDir.length + 1), chars: snapshot.length }) + "\n");
+          logDecision(analysisLog, ts, "browser_snapshot", logIds, { file: snapshotPath.slice(snapshotsDir.length + 1), chars: snapshot.length });
         }
 
         // Context-only pre-check for fill/type/select: judged on the destination
@@ -1188,11 +1308,11 @@ Use BLOCK when this page or form clearly does not belong to the confirmed task (
           try {
             const contextText = await callLlm(analysisCfg, contextPrompt);
             const { verdict: contextVerdict, reason: contextReason } = parseVerdict(contextText);
-            appendFileSync(analysisLog, JSON.stringify({ ts, toolName: event.toolName, phase: "context", verdict: contextVerdict, analysis: contextText }) + "\n");
+            logDecision(analysisLog, ts, "context_analysis", logIds, { toolName: event.toolName, verdict: contextVerdict, analysis: contextText });
 
             if (contextVerdict === "block") {
               console.warn(`[nancy] 🛑 BLOCKED ${event.toolName} (context check, before reading the value): ${contextReason}`);
-              appendFileSync(logFile, JSON.stringify({ ts, event: "blocked_context", toolName: event.toolName, reason: contextReason }) + "\n");
+              logDecision(logFile, ts, "blocked_context", logIds, { toolName: event.toolName, reason: contextReason });
               notifyBlocked(`${event.toolName}: wrong page/form context, blocked before reading the value — ${contextReason}`, `${sessionKey}:context:${event.toolName}`);
               return { block: true, blockReason: contextReason || "NanCy blocked this action: the page/form context did not match the confirmed task." };
             }
@@ -1202,16 +1322,16 @@ Use BLOCK when this page or form clearly does not belong to the confirmed task (
               // confirmation is the only interactive step; anything uncertain
               // after that fails closed and the agent explains why.
               console.warn(`[nancy] 🛑 BLOCKED ${event.toolName} (context check, unclear): ${contextReason}`);
-              appendFileSync(logFile, JSON.stringify({ ts, event: "blocked_context_clarify", toolName: event.toolName, reason: contextReason }) + "\n");
+              logDecision(logFile, ts, "blocked_context_clarify", logIds, { toolName: event.toolName, reason: contextReason });
               notifyBlocked(`${event.toolName}: unclear page/form context — ${contextReason}`, `${sessionKey}:context:${event.toolName}`);
               return { block: true, blockReason: contextReason || "NanCy blocked this action: the page/form context does not clearly match the confirmed task." };
             }
             // contextVerdict === "allow" — fall through to the full, value-included check below
           } catch (err) {
-            appendFileSync(analysisLog, JSON.stringify({ ts, toolName: event.toolName, phase: "context", error: String(err) }) + "\n");
+            logDecision(analysisLog, ts, "context_analysis_error", logIds, { toolName: event.toolName, error: String(err) });
             const reason = `Could not verify the page/form context for ${event.toolName} (${String(err)}).`;
             console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: context analysis failed, blocking as precaution: ${String(err)}`);
-            appendFileSync(logFile, JSON.stringify({ ts, event: "blocked_context_error", toolName: event.toolName, error: String(err) }) + "\n");
+            logDecision(logFile, ts, "blocked_context_error", logIds, { toolName: event.toolName, error: String(err) });
             notifyBlocked(reason, `${sessionKey}:context-error:${event.toolName}`);
             return { block: true, blockReason: reason };
           }
@@ -1231,11 +1351,11 @@ Use BLOCK when the action clearly contradicts or exceeds the confirmed task, loo
       try {
         const analysisText = await callLlm(analysisCfg, prompt);
         const { verdict, reason } = parseVerdict(analysisText);
-        appendFileSync(analysisLog, JSON.stringify({ ts, toolName: event.toolName, verdict, analysis: analysisText }) + "\n");
+        logDecision(analysisLog, ts, "full_analysis", logIds, { toolName: event.toolName, verdict, analysis: analysisText });
 
         if (verdict === "block") {
           console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: ${reason}`);
-          appendFileSync(logFile, JSON.stringify({ ts, event: "blocked", toolName: event.toolName, reason }) + "\n");
+          logDecision(logFile, ts, "blocked", logIds, { toolName: event.toolName, reason });
           notifyBlocked(`${event.toolName}: ${reason}`, `${sessionKey}:blocked:${event.toolName}`);
           return { block: true, blockReason: reason || "NanCy blocked this action: it did not match the confirmed task." };
         }
@@ -1246,22 +1366,22 @@ Use BLOCK when the action clearly contradicts or exceeds the confirmed task, loo
           // is interactive; anything uncertain during execution fails closed
           // and the agent explains the block to the user in its own words.
           console.warn(`[nancy] 🛑 BLOCKED ${event.toolName} (unclear): ${reason}`);
-          appendFileSync(logFile, JSON.stringify({ ts, event: "blocked_clarify", toolName: event.toolName, reason }) + "\n");
+          logDecision(logFile, ts, "blocked_clarify", logIds, { toolName: event.toolName, reason });
           notifyBlocked(`${event.toolName}: ${reason}`, `${sessionKey}:clarify:${event.toolName}`);
           return { block: true, blockReason: reason || "NanCy blocked this action: it does not clearly match the confirmed task." };
         }
         if (verdict === "allow" && nancyConfig.testMode) {
           const testReason = `[TEST MODE] NanCy would have ALLOWED this in production: ${reason || "matches the confirmed task."} Execution stopped because testMode is enabled — no tool call ever actually goes through in test mode.`;
           console.warn(`[nancy] 🧪 TEST MODE — would ALLOW ${event.toolName}: ${reason}`);
-          appendFileSync(logFile, JSON.stringify({ ts, event: "test_mode_would_allow", toolName: event.toolName, analyzed: true, reason }) + "\n");
+          logDecision(logFile, ts, "test_mode_would_allow", logIds, { toolName: event.toolName, analyzed: true, reason });
           return { block: true, blockReason: testReason };
         }
         // verdict === "allow" (and not testMode) — fall through and let the call proceed
       } catch (err) {
-        appendFileSync(analysisLog, JSON.stringify({ ts, toolName: event.toolName, error: String(err) }) + "\n");
+        logDecision(analysisLog, ts, "analysis_error", logIds, { toolName: event.toolName, error: String(err) });
         const reason = `Could not verify the safety of ${event.toolName} (${String(err)}).`;
         console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: analysis failed, blocking as precaution: ${String(err)}`);
-        appendFileSync(logFile, JSON.stringify({ ts, event: "blocked_analysis_error", toolName: event.toolName, error: String(err) }) + "\n");
+        logDecision(logFile, ts, "blocked_analysis_error", logIds, { toolName: event.toolName, error: String(err) });
         notifyBlocked(reason, `${sessionKey}:analysis-error:${event.toolName}`);
         return { block: true, blockReason: reason };
       }
