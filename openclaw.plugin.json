@@ -33,6 +33,58 @@
           }
         },
         "required": ["provider", "model", "apiKey"]
+      },
+      "browser": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Connection to the browser tool's snapshot endpoint, used for DOM/page-context checks",
+        "properties": {
+          "port": {
+            "type": "number",
+            "description": "Port the browser tool's snapshot endpoint listens on (default 18791)"
+          },
+          "token": {
+            "type": "string",
+            "description": "Bearer token for the snapshot endpoint, if required"
+          }
+        }
+      },
+      "domains": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Domain Border Control: allow/deny lists and reputation checks for web_fetch and browser navigation",
+        "properties": {
+          "allow": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "If set, only these domains (and their subdomains) may be reached; every other domain is blocked"
+          },
+          "deny": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Domains (and their subdomains) that are always blocked, checked when no allow-list is set"
+          },
+          "reputationCheck": {
+            "type": "boolean",
+            "description": "Look up domains against URLhaus (abuse.ch), a free keyless malicious-URL database, when not covered by allow/deny. Default true."
+          },
+          "minAgeDays": {
+            "type": "number",
+            "description": "Block domains registered more recently than this many days ago, via a free RDAP lookup (WHOIS successor). Catches disposable attack domains too new for any blocklist. Off by default (0/unset) — legitimate new sites exist, so this is a real false-positive risk the operator opts into."
+          }
+        }
+      },
+      "mainSessionKey": {
+        "type": "string",
+        "description": "Session key of the main/chat session. When set, that session is locked to passive reads only — state-changing tools are blocked outright and must go through a confirmed task instead, which NanCy spawns as an isolated worker session (see workerAgentId). If unset, the main/worker split is disabled and every session is treated the same way."
+      },
+      "mainSessionIdleMinutes": {
+        "type": "number",
+        "description": "Minutes of inactivity after which the main session (mainSessionKey) is automatically reset, so prompt-injected context can't quietly accumulate across an unbounded chat session. Default 60. Checked every 5 minutes."
+      },
+      "workerAgentId": {
+        "type": "string",
+        "description": "Agent id used to spawn an isolated worker session for each confirmed task (session key: agent:<workerAgentId>:task-<id>). The worker session is deleted once the task completes. If unset, NanCy still records confirmations but does not spawn workers automatically."
       }
     }
   }
