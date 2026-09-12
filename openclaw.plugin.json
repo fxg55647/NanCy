@@ -89,6 +89,10 @@
       "telegramAlerts": {
         "type": "boolean",
         "description": "Live Telegram push for blocked actions, session termination, and the startup status message. Everything is always fully written to nancy.log/nancy-analysis.log regardless of this setting — it only controls the live phone notification. Default true."
+      },
+      "testMode": {
+        "type": "boolean",
+        "description": "Test/dry-run mode: before_tool_call analysis still runs and is fully logged as normal, but no tool call is ever actually allowed to execute — a call that would have been ALLOWED (or that never needed analysis) is hard-blocked at the last moment instead, with the real verdict/reason included in the block message. Lets a task run against NanCy end-to-end with zero risk of a real side effect. Default false."
       }
     }
   }

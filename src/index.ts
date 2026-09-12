@@ -91,6 +91,15 @@ interface NancyConfig {
   // / nancy-analysis.log regardless of this setting — it only controls the
   // live phone notification. Default true.
   telegramAlerts?: boolean;
+  // Test/dry-run mode: every before_tool_call analysis (context-check and
+  // full-verdict) still runs and is fully logged exactly as normal, but no
+  // tool call is ever actually allowed to execute — a call that would have
+  // been ALLOWED, or that never needed analysis at all, is hard-blocked at
+  // the last moment instead, with the real verdict/reason recorded in the
+  // block message and in nancy.log/nancy-analysis.log. Lets a task be run
+  // against NanCy end-to-end (confirmation dance included) to see exactly
+  // what it would decide, with zero risk of a real side effect. Default false.
+  testMode?: boolean;
 }
 
 // Minimal shape of the subagent runtime NanCy needs to spawn and clean up
@@ -686,6 +695,11 @@ Reply ONLY with valid JSON — no other text:
         console.warn("[nancy] ⚠️  mainSessionKey not set — the main/worker session split is disabled; every session is treated the same way");
       }
 
+      if (nancyConfig.testMode) {
+        console.warn("[nancy] 🧪 TEST MODE ENABLED — analysis runs and is fully logged as normal, but no tool call will ever actually execute. Remember to turn this off for real use.");
+        appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "test_mode_enabled" }) + "\n");
+      }
+
       if (telegramAlertsEnabled) {
         const statusLine = writable.length > 0
           ? `⚠️ *SECURITY WARNING*: unprotected files: ${writable.map(f => f.label).join(", ")}`
@@ -694,7 +708,8 @@ Reply ONLY with valid JSON — no other text:
           ? `✅ Analysis: ${nancyConfig.analysis.provider}/${nancyConfig.analysis.model}`
           : `⚠️ Analysis: not configured`;
         const splitStatus = nancyConfig.mainSessionKey ? `✅ Main/worker split: enabled` : `⚠️ Main/worker split: disabled`;
-        telegramAlert(telegramBotToken!, telegramChatId!, `🛡 *NanCy online*\n${statusLine}\n${analysisStatus}\n${splitStatus}`).catch(() => { });
+        const testModeStatus = nancyConfig.testMode ? `\n🧪 *TEST MODE*: no tool call can actually execute` : "";
+        telegramAlert(telegramBotToken!, telegramChatId!, `🛡 *NanCy online*\n${statusLine}\n${analysisStatus}\n${splitStatus}${testModeStatus}`).catch(() => { });
       }
 
       // Idle reset: periodically check the main session's last activity and
@@ -1099,7 +1114,15 @@ Use BLOCK when the message contains data or requests that were not authorized by
         }
       }
 
-      if (!shouldAnalyze(event.toolName, event.params)) return;
+      if (!shouldAnalyze(event.toolName, event.params)) {
+        if (nancyConfig.testMode) {
+          const reason = `[TEST MODE] '${event.toolName}' never requires analysis (always considered safe) and would have gone through. In test mode, no tool call is ever actually executed.`;
+          console.warn(`[nancy] 🧪 TEST MODE — would ALLOW ${event.toolName} without analysis (never required it)`);
+          appendFileSync(logFile, JSON.stringify({ ts, event: "test_mode_would_allow", toolName: event.toolName, analyzed: false }) + "\n");
+          return { block: true, blockReason: reason };
+        }
+        return;
+      }
 
       const analysisCfg = nancyConfig.analysis;
       if (!analysisCfg) {
@@ -1209,7 +1232,13 @@ Use BLOCK when the action clearly contradicts or exceeds the confirmed task, loo
           notifyBlocked(`${event.toolName}: ${reason}`, `${sessionKey}:clarify:${event.toolName}`);
           return { block: true, blockReason: reason || "NanCy blocked this action: it does not clearly match the confirmed task." };
         }
-        // verdict === "allow" — fall through and let the call proceed
+        if (verdict === "allow" && nancyConfig.testMode) {
+          const testReason = `[TEST MODE] NanCy would have ALLOWED this in production: ${reason || "matches the confirmed task."} Execution stopped because testMode is enabled — no tool call ever actually goes through in test mode.`;
+          console.warn(`[nancy] 🧪 TEST MODE — would ALLOW ${event.toolName}: ${reason}`);
+          appendFileSync(logFile, JSON.stringify({ ts, event: "test_mode_would_allow", toolName: event.toolName, analyzed: true, reason }) + "\n");
+          return { block: true, blockReason: testReason };
+        }
+        // verdict === "allow" (and not testMode) — fall through and let the call proceed
       } catch (err) {
         appendFileSync(analysisLog, JSON.stringify({ ts, toolName: event.toolName, error: String(err) }) + "\n");
         const reason = `Could not verify the safety of ${event.toolName} (${String(err)}).`;
