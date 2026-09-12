@@ -96,6 +96,17 @@ In the NanCy SSIL framework, it is perfectly acceptable—and often encouraged�
 **A failed task is a minor inconvenience; an unauthorized credit card drain is a catastrophe.** NanCy SSIL ensures that when the system fails, it fails safely.
 
 
+## Security philosophy
+
+NanCy is not designed to make high-stakes or safety-critical autonomous systems safe. It is designed to make lower-stakes autonomy more practical by limiting what a failure can become.
+
+The principle is simple: useful autonomy does not require perfect safety — it requires the worst credible failure to be sufficiently bounded.
+
+Give agents narrow permissions, limited funds, task-scoped data access, revocable credentials, and explicit approval boundaries. If completely misusing a capability once could cause serious human suffering, major reputational harm, or an unacceptable financial loss, do not give that capability to a general-purpose autonomous agent.
+
+See **["Security Philosophy: Limit the Blast Radius"](./SECURITY-PHILOSOPHY.md)** for deployment guidance, examples, limitations, and further reading.
+
+
 ## Where This Fits (as of September 2026)
 
 Is a stateless external model gating an agent's actions against a locked intent a novel idea? No — by September 2026 this is a widely recognized, increasingly standard pattern in agent security, not something invented here:
@@ -206,7 +217,23 @@ Add `mainSessionKey`, and optionally `mainSessionIdleMinutes`/`workerAgentId`, t
 "workerAgentId": "worker"
 ```
 
-`workerAgentId` must be an agent id already defined in your `agents.entries` config — NanCy spawns worker sessions under it (`agent:<workerAgentId>:task-<id>`), it doesn't define the agent itself. Omit `workerAgentId` to still get the main-session hard gate and idle reset without automatic worker spawning.
+`workerAgentId` must be an agent id already defined in your `agents.entries` config — NanCy spawns worker sessions under it (`agent:<workerAgentId>:task-<id>`), it doesn't define the agent itself. Register it first, e.g.:
+
+```bash
+openclaw agents add worker --workspace /path/to/worker-workspace --non-interactive
+```
+
+Omit `workerAgentId` to still get the main-session hard gate and idle reset without automatic worker spawning.
+
+#### CLARIFY verdicts need the channel's approval surface enabled
+
+When NanCy returns CLARIFY (feature #1), OpenClaw shows the user an approve/deny prompt on the originating channel via `requireApproval`. On at least Telegram, that surface is gated by the channel's own exec-approval setting and is **off by default** — with it off, a CLARIFY verdict fails outright (`Plugin approval unavailable: the ... initiating surface is disabled`) instead of pausing for a decision, and the agent will typically retry the same call repeatedly until it gives up. Enable it for your channel, e.g.:
+
+```bash
+openclaw config set channels.telegram.execApprovals.enabled true
+```
+
+This requires a full gateway restart (`openclaw gateway run` again, or restart the service) — it does not hot-reload like most plugin config changes.
 
 ### 3. Add task confirmation rules to your agent
 

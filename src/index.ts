@@ -544,10 +544,24 @@ export default definePluginEntry({
     // Spawns an isolated worker session to execute a freshly confirmed task,
     // then deletes that session once the run finishes so its transcript can't
     // accumulate context across tasks (each task gets a clean session).
-    async function spawnWorkerForTask(task: { id: string; description: string }): Promise<void> {
+    async function spawnWorkerForTask(task: { id: string; ts: string; description: string; status: string; openclaw_task_id: null }): Promise<void> {
       if (!nancyConfig.workerAgentId) return;
       const taskId = task.id;
       const workerSessionKey = `agent:${nancyConfig.workerAgentId}:task-${taskId}`;
+      // The worker's before_tool_call resolves its own confirmed-task context via
+      // getAgentPaths(ctx.agentId) — the worker agent's own workspace, not the
+      // main agent's, where message_received (above) wrote the record. Without
+      // this copy the worker session sees no confirmed task at all and every
+      // action it takes gets an unnecessary CLARIFY.
+      try {
+        const workerPaths = getAgentPaths(nancyConfig.workerAgentId);
+        mkdirSync(workerPaths.TASKS_DIR, { recursive: true });
+        const taskJson = JSON.stringify(task, null, 2);
+        writeFileSync(join(workerPaths.TASKS_DIR, `${taskId}.json`), taskJson);
+        writeFileSync(join(workerPaths.TASKS_DIR, "current.json"), taskJson);
+      } catch (err) {
+        appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "worker_task_copy_error", taskId, error: String(err) }) + "\n");
+      }
       try {
         const subagent = getSubagentRuntime();
         const result = await subagent.run({
