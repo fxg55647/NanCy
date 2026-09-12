@@ -34,6 +34,28 @@ NanCy turns a user-confirmed task into a temporary semantic authorization bounda
 
 The individual mechanisms have prior art. NanCy's contribution is combining them into a compact OpenClaw workflow: code-owned confirmation, bounded semantic review, deterministic policy controls, and a disposable worker for each confirmed task. See [Where This Fits](#where-this-fits) and [RELATED-WORK.md](./RELATED-WORK.md) for the comparisons and limits of this claim, and [INCIDENTS.md](./INCIDENTS.md) for concrete public failures this design is intended to reduce.
 
+## What NanCy Adds to OpenClaw
+
+OpenClaw already provides security controls such as sandboxing, tool policies, approvals, and access controls. NanCy is an additional task-authorization and supervision layer; it does not replace those controls. Compared with the same OpenClaw deployment without NanCy, the current implementation adds:
+
+| Additional safeguard | What it changes in practice |
+|---|---|
+| **Code-owned task confirmation** | The agent may ask for approval, but only NanCy interprets the user's exact `y`/`yes` reply and writes the confirmation record. The agent cannot grant authority to itself. |
+| **One temporary authorization boundary per task** | A confirmation authorizes the described task rather than every action available to the agent. Confirmations expire after four hours, and worker sessions are tied to their own task record. |
+| **Fresh review of consequential tool calls** | A separate one-shot reviewer checks each action selected for semantic analysis against the confirmed task, standing policy, recent activity, and relevant context. Unclear actions are blocked instead of silently proceeding; a narrow set of passive operations is exempt from LLM review. |
+| **Outbound-message review** | Ordinary outbound messages are checked as well as tool calls, covering channels whose delivery does not appear as a separate tool invocation. This closes a gap that tool-only supervision would leave. |
+| **Independent reviewer configuration** | The reviewer model is configured separately from the main agent. Operators can use a different model family or provider to reduce correlated failures. |
+| **Permanent limits on methods** | [`NANCY-POLICY.md`](./NANCY-POLICY.md) applies to every task, so a useful goal does not authorize exploitation, access-control bypass, deception, retaliation, unnecessary disclosure, or evasion of supervision. A mandatory minimum policy is also compiled into the plugin. |
+| **Deterministic protection of the control plane** | Direct agent writes to confirmation records, operator policy, core agent instructions, NanCy source, and plugin configuration are blocked independently of the reviewer model. Startup checks also warn when protected files remain writable at the OS level. |
+| **Domain border control** | Web destinations can be constrained with allow/deny lists. Otherwise NanCy checks URLhaus reputation by default, with optional domain-age checks for newly registered hosts. |
+| **Browser destination context** | Before browser interaction, the reviewer receives a text snapshot of the current page. For fields that carry a value, NanCy first checks the destination without exposing that value to the reviewer prompt. |
+| **Passive main and scheduled sessions** *(optional for main)* | With `mainSessionKey` configured, the main chat is limited to passive operations. Cron-triggered runs receive the same default-deny gate automatically, so unattended schedules cannot start consequential work directly. |
+| **Disposable execution workers** *(optional)* | Each confirmed task can run in a dedicated worker session that is deleted after completion or timeout, reducing context carry-over between tasks. The main session can also be reset after an idle period. |
+| **Review of behavior over time** | In addition to per-action checks, NanCy periodically reviews recent calls for loops, gradual privilege escalation, repeated blocked attempts, and attempts to bypass supervision. A sustained violation can terminate the session. |
+| **Security audit trail and alerts** | Tool, message, and confirmation decisions are written to correlated logs. Configured Telegram notifications surface startup warnings, blocks, suspicious behavioral patterns, and session termination. |
+
+These safeguards are defense in depth, not a claim that an OpenClaw deployment becomes safe by installing the plugin. Some checks are probabilistic, some protections are optional, outbound-message analysis currently fails open if its reviewer call fails, and the reviewer has no dedicated prompt-injection defense yet. The detailed behavior and limitations are documented below.
+
 
 ## Key Technical Features
 
@@ -76,7 +98,7 @@ NanCy actively blocks any `write`, `edit`, or `apply_patch` tool call whose targ
 
 ### 7. Main/Worker Session Split ✅ (optional)
 
-When `mainSessionKey` is configured, that session is locked to passive reads — `write`, `edit`, `exec`/`shell`/`bash`, and the interactive browser commands are blocked outright, independent of LLM analysis. Real work happens only once a task is confirmed (feature #2): NanCy then spawns a dedicated worker session (`agent:<workerAgentId>:task-<id>`) to execute it, and deletes that session once the run finishes so one task's context can never bleed into the next. The main session itself is also reset after `mainSessionIdleMinutes` of inactivity (default 60), so it can't silently accumulate injected context over an unbounded chat. Without `mainSessionKey` set, this split is disabled and every session is treated the same way.
+When `mainSessionKey` is configured, that session is locked to passive reads — `write`, `edit`, `exec`/`shell`/`bash`, and the interactive browser commands are blocked outright, independent of LLM analysis. Cron-triggered sessions receive the same default-deny gate automatically, even when their session key differs from `mainSessionKey`, so a schedule cannot become an unattended route around the main-session boundary. Real work happens only once a task is confirmed (feature #2): NanCy then spawns a dedicated worker session (`agent:<workerAgentId>:task-<id>`) to execute it, and deletes that session once the run finishes so one task's context can never bleed into the next. The main session itself is also reset after `mainSessionIdleMinutes` of inactivity (default 60), so it can't silently accumulate injected context over an unbounded chat. Without `mainSessionKey` set, the main-chat split is disabled; cron-triggered runs remain gated.
 
 ### 8. Behavioral Review & Session Termination ✅
 
