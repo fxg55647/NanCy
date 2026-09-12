@@ -1,40 +1,44 @@
 # TODO
 
-## Moduloi src/index.ts
+## Moduloi src/index.ts — ✅ tehty
 
-Nyt kaikki logiikka on yhdessä ~75 KB:n tiedostossa (`src/index.ts`) — ks.
-CLAUDE.md. Kun tiedosto kasvaa hankalan isoksi, pilko se seuraavan
-suuntaviivan mukaan (ei vielä tehty — tämä on vain muistiin kirjattu
-tavoiterakenne, ei aikataulutettu):
+`src/index.ts` pilkottiin alla olevan suuntaviivan mukaisesti. Lopullinen
+rakenne (kaksi pientä lisäystä alkuperäiseen suunnitelmaan: `constants.ts`
+jaetuille timeout-vakioille, ja `analysis/macro-review.ts` erotettu omaksi
+tiedostokseen `context.ts`:n rinnalle):
 
 ```
 src/
 ├── index.ts                 # pluginin rekisteröinti ja hookien kytkentä
+├── constants.ts             # jaetut fetch-timeoutit
 ├── config.ts                # NancyConfig ja asetusten validointi
 ├── analysis/
 │   ├── client.ts            # Gemini/OpenAI/Anthropic-kutsut
 │   ├── context.ts           # analyysikontekstin rakentaminen
+│   ├── macro-review.ts      # 10 kutsun välein ajettava käytösanalyysi
 │   └── verdict.ts           # ALLOW/BLOCK/CLARIFY-jäsennys
 ├── policy/
 │   ├── tool-policy.ts       # main/cron/default-deny
 │   ├── protected-paths.ts
+│   ├── operator-policy.ts   # sisäänrakennettu minimi + NANCY-POLICY.md
 │   └── domain-policy.ts
 ├── confirmation/
 │   ├── protocol.ts          # vahvistusviestien käsittely
-│   └── tasks.ts             # sessioon sidotut tehtävävaltuutukset
+│   └── tasks.ts             # sessioon sidotut tehtävävaltuutukset ja pending-confirmationit
 ├── workers/
 │   └── worker-manager.ts    # käynnistys, odotus ja cleanup
 ├── notifications/
 │   └── telegram.ts
+├── browser/
+│   └── snapshot.ts          # DOM Biopsy -snapshotit (tiedostonimet, pruning, fetch)
 ├── logging/
 │   └── logger.ts
-└── state.ts                 # sessiokohtainen tila
+└── state.ts                 # sessiokohtainen tila (recent calls/reasoning, cron-trigger, counters)
 ```
 
-Huomioita pilkkomista varten:
-- Tee vasta kun kaksi rinnakkaista muokkaustyötä samaan tiedostoon ei enää ole
-  käynnissä — pilkkominen kesken toisen session muokkauksien aiheuttaisi
-  ison merge-riskin.
-- `test/`-hakemiston mockattu `api`-harnessi (ks. `test/helpers.ts`) pitäisi
-  toimia sellaisenaan pilkkomisen jälkeenkin, koska se ajaa `register(api)`:a
-  mustana laatikkona — hyvä regressiosuoja pilkkomiselle.
+`index.ts` sisältää nyt vain pluginin rekisteröinnin ja `api.on(...)`-hookien
+kytkennän — jokainen hook kutsuu yllä olevien moduulien tehdasfunktioita
+(`createXxx(...)`), jotka on parametrisoitu (`api`, `nancyConfig`, `logFile`
+jne.) sen sijaan että ne sulkeutuisivat suoraan `register()`:n paikallisten
+muuttujien yli. `npm run check` (typecheck + `test/`-hakemiston mockattu
+`register(api)`-black-box-harnessi) pysyi vihreänä koko pilkkomisen ajan.

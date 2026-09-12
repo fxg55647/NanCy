@@ -1,7 +1,8 @@
 # Testing NanCy
 
-NanCy is security-critical, single-file, and easy to get subtly wrong. This
-doc is the fast-orientation guide for testing changes to `src/index.ts` —
+NanCy is security-critical and easy to get subtly wrong. This doc is the
+fast-orientation guide for testing changes to the plugin (`src/index.ts` and
+the modules under `src/` it wires together — see `CLAUDE.md`'s module map) —
 read it before touching `before_tool_call`, `message_sending`, or `testMode`
 logic. It complements `CLAUDE.md` (orientation) and `SECURITY-PHILOSOPHY.md`
 (deployment posture).
@@ -168,8 +169,8 @@ made every browser call invisible to both analysis and the main-session
 gate, in every session type, regardless of what it actually did.
 
 - **Hard-blocked outright, no LLM call, independent of session**: writes to
-  a protected file (`AGENTS.md`/`IDENTITY.md`/`MEMORY.md`/NanCy's own
-  code/config), and Domain Border Control denials.
+  a protected file (`AGENTS.md`/`IDENTITY.md`/`MEMORY.md`/`NANCY-POLICY.md`/
+  NanCy's own code/config), and Domain Border Control denials.
 - **Main session and cron-triggered runs: default-deny allowlist, no LLM
   call either way.** `isMainGateAllowed()` only lets through pure local
   reads (`read`, `ls`, `view_image`, `get_goal`, `session_status`,

@@ -1,459 +1,29 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
-import { appendFileSync, readFileSync, accessSync, constants, mkdirSync, writeFileSync, existsSync, statSync, renameSync, readdirSync, unlinkSync } from "fs";
-import { join, resolve, sep } from "path";
-
-// Applied to every outbound fetch below so a hung/slow third-party response
-// can't stall before_tool_call (and therefore the agent) indefinitely.
-const FETCH_TIMEOUT_MS = 15_000;
-const LLM_FETCH_TIMEOUT_MS = 30_000;
-
-function isWritable(filePath: string): boolean {
-  try { accessSync(filePath, constants.W_OK); return true; }
-  catch { return false; }
-}
-
-// Best-effort SecretInput resolution: config fields like telegram.botToken can be
-// a plain string or a { source, provider, id } reference. Only the "env" source
-// is resolvable from a plugin without the platform's own secret-provider machinery
-// (confirmed against openclaw's config-cli validation: for source "env", `id` is
-// literally the environment variable name) — anything else is left unresolved.
-function resolveSecretInputBestEffort(value: unknown): string | null {
-  if (typeof value === "string") return value;
-  if (value && typeof value === "object") {
-    const ref = value as { source?: string; id?: string };
-    if (ref.source === "env" && typeof ref.id === "string") return process.env[ref.id] ?? null;
-  }
-  return null;
-}
-
-// Best-effort check that the analysis ("trusted monitor") model isn't the same
-// as the main agent's own model. AI-control research on trusted monitoring
-// (e.g. Redwood Research's work) treats an independent reviewer model as
-// important for avoiding correlated blind spots / monitor-agent collusion —
-// this can only warn, since model-ref naming isn't standardized across configs.
-function normalizeModelRef(raw: unknown): string | null {
-  if (typeof raw === "string") return raw.toLowerCase();
-  if (raw && typeof raw === "object") {
-    const primary = (raw as Record<string, unknown>).primary;
-    if (typeof primary === "string") return primary.toLowerCase();
-  }
-  return null;
-}
-
-function resolveMainAgentModelRef(cfg: Record<string, unknown>, agentId: string): string | null {
-  const agents = cfg?.agents as Record<string, unknown> | undefined;
-  const entries = agents?.entries as Record<string, unknown> | undefined;
-  const entry = entries?.[agentId] as Record<string, unknown> | undefined;
-  const defaults = agents?.defaults as Record<string, unknown> | undefined;
-  return normalizeModelRef(entry?.model) ?? normalizeModelRef(defaults?.model);
-}
-
-async function telegramAlert(botToken: string, chatId: string, text: string): Promise<void> {
-  await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "Markdown" }),
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-  });
-}
-
-interface AnalysisConfig {
-  provider: "gemini" | "openai" | "openai-compat" | "anthropic";
-  model: string;
-  apiKey: string;
-  baseUrl?: string;
-}
-
-interface DomainConfig {
-  allow?: string[];
-  deny?: string[];
-  reputationCheck?: boolean;
-  minAgeDays?: number;
-}
-
-interface NancyConfig {
-  analysis?: AnalysisConfig;
-  browser?: {
-    port?: number;
-    token?: string;
-  };
-  domains?: DomainConfig;
-  // Session key of the main/chat session. When set, that session is locked to
-  // passive reads only (see the MAIN_ALLOWED_TOOLS/isMainGateAllowed default-deny
-  // gate below) — real work must go through a confirmed task, which NanCy
-  // spawns as an isolated worker session.
-  mainSessionKey?: string;
-  // Minutes of main-session inactivity after which it's automatically reset.
-  mainSessionIdleMinutes?: number;
-  // Agent id used to spawn an isolated worker session per confirmed task.
-  workerAgentId?: string;
-  // Live Telegram push for blocked actions, session termination, and the
-  // startup status message. Everything is always fully written to nancy.log
-  // / nancy-analysis.log regardless of this setting — it only controls the
-  // live phone notification. Default true.
-  telegramAlerts?: boolean;
-  // Live Telegram push reporting the outcome of every confirmed task once its
-  // worker session finishes — success or failure — including the worker's
-  // own final reply text when it produced one. Independent of telegramAlerts
-  // (which covers blocks/termination/boot status only). Default true.
-  telegramTaskReports?: boolean;
-  // Test/dry-run mode: every analysis (before_tool_call's context-check and
-  // full-verdict, and message_sending's outbound-intent check) still runs and
-  // is fully logged exactly as normal, but no tool call ever actually
-  // executes and no outbound message is ever actually delivered — a call or
-  // message that would have been ALLOWED, or that never needed analysis at
-  // all, is hard-blocked/canceled at the last moment instead, with the real
-  // verdict/reason recorded in the block message and in
-  // nancy.log/nancy-analysis.log. The ONE exception is NanCy's own
-  // fixed-format confirmation-request prompt (see parseConfirmationRequest):
-  // it is always sent for real, in test mode or not, because it's the only
-  // way to drive the confirm/deny dance end-to-end, it's a rigid
-  // NanCy-recognized template rather than arbitrary agent-authored content,
-  // and it is sent for real in production too — so exempting it adds no new
-  // real-world exposure test mode wouldn't already have. Every other
-  // outbound send — including the "analysis not configured" and
-  // "analysis failed" cases, which normally fail open — is dry-run only.
-  // Lets a task be run against NanCy end-to-end to see exactly what it would
-  // decide. Default false.
-  testMode?: boolean;
-}
-
-// A task NanCy itself has confirmed via the user's "y" reply (see
-// message_received) and handed to exactly one worker session to execute
-// (see spawnWorkerForTask/taskBySessionKey).
-interface ConfirmedTask {
-  id: string;
-  ts: string;
-  description: string;
-  status: string;
-  openclaw_task_id: null;
-}
-
-// Minimal shape of the subagent runtime NanCy needs to spawn and clean up
-// worker sessions. Cast from api.runtime, which doesn't type this publicly.
-type SubagentRuntime = {
-  run: (p: { sessionKey: string; message: string; idempotencyKey?: string }) => Promise<{ runId: string }>;
-  waitForRun: (p: { runId: string; timeoutMs?: number }) => Promise<{
-    status: "ok" | "error" | "timeout" | "pending";
-    error?: string;
-    // Present when the worker's own agent turn produced a normal visible
-    // reply — its actual final text, not just a status code. Absent (or a
-    // non-"visible" disposition) when the run ended silently, empty, or via
-    // an error path instead.
-    terminalReply?: { disposition: "visible"; text: string } | { disposition: "silent" | "empty" };
-  }>;
-  deleteSession: (p: { sessionKey: string; deleteTranscript?: boolean }) => Promise<void>;
-};
-
-function extractCandidateUrl(toolName: string, params: unknown): string | null {
-  const p = params as Record<string, unknown>;
-  if (toolName === "web_fetch" || toolName === "browser") {
-    return typeof p?.url === "string" ? p.url : null;
-  }
-  return null;
-}
-
-function hostnameMatches(hostname: string, pattern: string): boolean {
-  const h = hostname.toLowerCase();
-  const pat = pattern.toLowerCase().replace(/^\*\./, "");
-  return h === pat || h.endsWith(`.${pat}`);
-}
-
-// Avoids re-querying the same host repeatedly within a session; failures are
-// never cached, only successful lookups (a transient API error next time
-// should still get a fresh attempt rather than being stuck at "unknown").
-const urlhausCache = new Map<string, { malicious: boolean; ts: number }>();
-const URLHAUS_CACHE_TTL_MS = 10 * 60 * 1000;
-
-async function checkUrlhausReputation(hostname: string): Promise<boolean | null> {
-  const cached = urlhausCache.get(hostname);
-  if (cached && Date.now() - cached.ts < URLHAUS_CACHE_TTL_MS) return cached.malicious;
-  try {
-    const res = await fetch("https://urlhaus-api.abuse.ch/v1/host/", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: `host=${encodeURIComponent(hostname)}`,
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
-    if (!res.ok) return null;
-    const data = await res.json() as { query_status?: string };
-    // "ok" means the host was found in URLhaus's malicious-URL database
-    const malicious = data.query_status === "ok";
-    urlhausCache.set(hostname, { malicious, ts: Date.now() });
-    return malicious;
-  } catch {
-    // Reputation lookup is a best-effort extra signal, not the sole gate —
-    // fail open on network errors rather than blocking every fetch when
-    // the third-party API is unreachable.
-    return null;
-  }
-}
-
-// URLhaus only indexes hosts tied to *known* malware — a domain registered
-// yesterday purely for one targeted phishing/exfiltration attempt is very
-// unlikely to be listed there yet. Domain age (via RDAP) is a free, keyless
-// signal for exactly that gap: legitimate businesses are rarely days old,
-// disposable attack infrastructure often is.
-//
-// Queried the standards-compliant way (RFC 7484/9224 bootstrap + RFC 9083
-// event parsing) rather than depending on any single convenience proxy:
-// IANA's bootstrap file maps each TLD to its authoritative RDAP server.
-let rdapBootstrapPromise: Promise<Map<string, string>> | null = null;
-
-async function loadRdapBootstrap(): Promise<Map<string, string>> {
-  if (!rdapBootstrapPromise) {
-    rdapBootstrapPromise = (async () => {
-      const map = new Map<string, string>();
-      try {
-        const res = await fetch("https://data.iana.org/rdap/dns.json", { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-        if (res.ok) {
-          const data = await res.json() as { services?: Array<[string[], string[]]> };
-          for (const [tlds, urls] of data.services ?? []) {
-            const base = urls?.[0];
-            if (!base) continue;
-            for (const tld of tlds) map.set(tld.toLowerCase(), base);
-          }
-        }
-      } catch { /* leave map empty — age check becomes a no-op below */ }
-      return map;
-    })();
-  }
-  return rdapBootstrapPromise;
-}
-
-// null means "couldn't determine" (unsupported TLD, privacy-redacted RDAP
-// record, registry unreachable) — never treated as suspicious, only a
-// successfully-parsed young age is.
-const domainAgeCache = new Map<string, { ageDays: number | null; ts: number }>();
-const DOMAIN_AGE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-
-async function checkDomainAgeDays(hostname: string): Promise<number | null> {
-  const cached = domainAgeCache.get(hostname);
-  if (cached && Date.now() - cached.ts < DOMAIN_AGE_CACHE_TTL_MS) return cached.ageDays;
-
-  const ageDays = await (async (): Promise<number | null> => {
-    try {
-      const labels = hostname.toLowerCase().split(".");
-      const tld = labels[labels.length - 1];
-      const base = (await loadRdapBootstrap()).get(tld);
-      if (!base) return null;
-      // Simplified "last two labels" registrable-domain guess — wrong for
-      // multi-part public suffixes (co.uk, com.au, github.io, ...), where it
-      // queries the shared second-level suffix instead of the actual site.
-      // That risks a false negative (an old shared suffix masking a brand-new
-      // subdomain under it), not a false positive, and only for those TLDs —
-      // a full Public Suffix List is the correct fix but out of scope here.
-      const registrableDomain = labels.slice(-2).join(".");
-      const url = `${base.endsWith("/") ? base : `${base}/`}domain/${registrableDomain}`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-      if (!res.ok) return null;
-      const data = await res.json() as { events?: Array<{ eventAction?: string; eventDate?: string }> };
-      const registration = data.events?.find(e => e.eventAction === "registration")?.eventDate;
-      if (!registration) return null;
-      const registeredAt = new Date(registration).getTime();
-      if (Number.isNaN(registeredAt)) return null;
-      return Math.floor((Date.now() - registeredAt) / (24 * 60 * 60 * 1000));
-    } catch {
-      return null;
-    }
-  })();
-
-  domainAgeCache.set(hostname, { ageDays, ts: Date.now() });
-  return ageDays;
-}
-
-async function checkDomainBorder(url: string, cfg: DomainConfig | undefined): Promise<string | null> {
-  let hostname: string;
-  try {
-    hostname = new URL(url).hostname;
-  } catch {
-    return `Could not parse URL for domain check: ${url}`;
-  }
-
-  if (cfg?.allow && cfg.allow.length > 0) {
-    const allowed = cfg.allow.some(p => hostnameMatches(hostname, p));
-    return allowed ? null : `Domain "${hostname}" is not on the configured allow-list.`;
-  }
-
-  if (cfg?.deny?.some(p => hostnameMatches(hostname, p))) {
-    return `Domain "${hostname}" is on the configured deny-list.`;
-  }
-
-  if (cfg?.reputationCheck !== false) {
-    const malicious = await checkUrlhausReputation(hostname);
-    if (malicious) return `Domain "${hostname}" is flagged as malicious by URLhaus (abuse.ch).`;
-  }
-
-  // Off by default: legitimate new businesses exist, so this is a real
-  // false-positive risk the operator opts into, unlike reputationCheck above.
-  if (cfg?.minAgeDays && cfg.minAgeDays > 0) {
-    const ageDays = await checkDomainAgeDays(hostname);
-    if (ageDays !== null && ageDays < cfg.minAgeDays) {
-      return `Domain "${hostname}" was registered ${ageDays} day(s) ago, under the configured minimum of ${cfg.minAgeDays} day(s).`;
-    }
-  }
-
-  return null;
-}
-
-async function fetchBrowserSnapshot(port: number, token?: string): Promise<string | null> {
-  try {
-    const headers: Record<string, string> = {};
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-    const res = await fetch(`http://127.0.0.1:${port}/snapshot?format=ai`, { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-    if (!res.ok) return null;
-    return await res.text();
-  } catch {
-    return null;
-  }
-}
-
-function snapshotFilename(params: unknown): string {
-  const now = new Date();
-  const dd = String(now.getDate()).padStart(2, "0");
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const yyyy = now.getFullYear();
-  const HH = String(now.getHours()).padStart(2, "0");
-  const MM = String(now.getMinutes()).padStart(2, "0");
-  const SS = String(now.getSeconds()).padStart(2, "0");
-  const datePart = `${dd}-${mm}-${yyyy}`;
-  const timePart = `${HH}-${MM}-${SS}`;
-  let identifier = "browser";
-  let suffix = "_fetch";
-  try {
-    const url = String((params as Record<string, unknown>)?.url ?? "");
-    if (url) {
-      const parsed = new URL(url);
-      const hostname = parsed.hostname.replace(/[^a-z0-9.-]/gi, "-");
-      const path = parsed.pathname.replace(/[^a-z0-9]/gi, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 30);
-      identifier = path ? `${hostname}_${path}` : hostname;
-      if ([...parsed.searchParams].length >= 3) suffix = "_submit";
-    }
-  } catch { }
-  return `${timePart}_${datePart}_${identifier}${suffix}.txt`;
-}
-
-// snapshotFilename's timestamp is second-granularity (kept deliberately short
-// for readability), so two snapshots for the same host in the same second
-// would otherwise silently overwrite each other. This appends -2, -3, ... on
-// collision instead.
-function uniqueSnapshotPath(dir: string, baseName: string): string {
-  let candidate = join(dir, baseName);
-  if (!existsSync(candidate)) return candidate;
-  const dot = baseName.lastIndexOf(".");
-  const stem = dot === -1 ? baseName : baseName.slice(0, dot);
-  const ext = dot === -1 ? "" : baseName.slice(dot);
-  for (let i = 2; i < 1000; i++) {
-    candidate = join(dir, `${stem}-${i}${ext}`);
-    if (!existsSync(candidate)) return candidate;
-  }
-  return join(dir, `${stem}-${Date.now()}${ext}`);
-}
-
-// Matches the exact confirmation-request format required in AGENTS.md §3.
-function parseConfirmationRequest(content: string): { id: string; description: string } | null {
-  const normalized = content.replace(/\r\n/g, "\n").trim();
-  const m = normalized.match(/^Formal confirmation:\s*([\s\S]*?)\s*\nReply y to proceed, any other reply cancels\.\s*\n(\d{6,10})$/);
-  if (!m) return null;
-  return { description: m[1].trim(), id: m[2].trim() };
-}
-
-// Per AGENTS.md §3: only an exact y/Y/Yes/yes reply counts as consent; anything else cancels.
-function isAffirmativeReply(content: string): boolean {
-  return /^\s*(y|yes)\s*$/i.test(content);
-}
-
-type Verdict = "allow" | "block" | "clarify";
-
-function parseVerdict(text: string | null): { verdict: Verdict; reason: string } {
-  if (!text) return { verdict: "clarify", reason: "No analysis response received." };
-  const match = text.match(/VERDICT:\s*(ALLOW|BLOCK|CLARIFY)/i);
-  const reasonMatch = text.match(/REASON:\s*([\s\S]*)/i);
-  const verdict = (match?.[1]?.toLowerCase() as Verdict | undefined) ?? "clarify";
-  const reason = reasonMatch?.[1]?.trim() ?? text.trim();
-  return { verdict, reason };
-}
-
-async function callLlm(cfg: AnalysisConfig, prompt: string): Promise<string | null> {
-  if (cfg.provider === "gemini") {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${cfg.model}:generateContent?key=${cfg.apiKey}`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-      signal: AbortSignal.timeout(LLM_FETCH_TIMEOUT_MS),
-    });
-    const data = await res.json() as Record<string, unknown>;
-    if (!res.ok) throw new Error(`Gemini API error ${res.status}: ${JSON.stringify(data)}`);
-    const candidates = data?.candidates as Array<{ content?: { parts?: Array<{ text?: string }> } }> | undefined;
-    return candidates?.[0]?.content?.parts?.[0]?.text ?? null;
-  }
-
-  if (cfg.provider === "openai" || cfg.provider === "openai-compat") {
-    const base = cfg.baseUrl ?? "https://api.openai.com";
-    const res = await fetch(`${base}/v1/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${cfg.apiKey}` },
-      body: JSON.stringify({ model: cfg.model, messages: [{ role: "user", content: prompt }], max_tokens: 300 }),
-      signal: AbortSignal.timeout(LLM_FETCH_TIMEOUT_MS),
-    });
-    const data = await res.json() as { choices?: Array<{ message?: { content?: string } }> };
-    if (!res.ok) throw new Error(`${cfg.provider} API error ${res.status}: ${JSON.stringify(data)}`);
-    return data?.choices?.[0]?.message?.content ?? null;
-  }
-
-  if (cfg.provider === "anthropic") {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": cfg.apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({ model: cfg.model, max_tokens: 300, messages: [{ role: "user", content: prompt }] }),
-      signal: AbortSignal.timeout(LLM_FETCH_TIMEOUT_MS),
-    });
-    const data = await res.json() as { content?: Array<{ text?: string }> };
-    if (!res.ok) throw new Error(`Anthropic API error ${res.status}: ${JSON.stringify(data)}`);
-    return data?.content?.[0]?.text ?? null;
-  }
-
-  return null;
-}
-
-// Single-generation rotation: renames the file aside once it crosses the size
-// cap. Called at gateway_start rather than per-write, so it doesn't add a
-// stat() call to every single log line on a busy gateway.
-const MAX_LOG_BYTES = 20 * 1024 * 1024;
-function rotateLogIfLarge(path: string): void {
-  try {
-    if (statSync(path).size > MAX_LOG_BYTES) renameSync(path, `${path}.1`);
-  } catch { /* file doesn't exist yet — nothing to rotate */ }
-}
-
-// Every decision/log line below is tagged with these four correlation ids —
-// without them, a busy gateway running multiple sessions/workers concurrently
-// makes it impossible to tell which call a given block or verdict belonged to.
-// sessionKey/runId/toolCallId come from the hook's own ctx/event (undefined
-// where the hook type doesn't carry one, e.g. runId on message_sending);
-// taskId is the currently-confirmed task, if any (see getCurrentTask).
-type LogIds = { sessionKey?: string; runId?: string; toolCallId?: string; taskId?: string };
-function logDecision(file: string, ts: string, event: string, ids: LogIds, extra: Record<string, unknown> = {}): void {
-  appendFileSync(file, JSON.stringify({ ts, event, ...ids, ...extra }) + "\n");
-}
-
-// Snapshots have no natural expiry, so cap the count and drop the oldest.
-const MAX_SNAPSHOTS = 1000;
-function pruneSnapshots(dir: string, keep: number): void {
-  try {
-    const files = readdirSync(dir)
-      .map(f => ({ f, mtime: statSync(join(dir, f)).mtimeMs }))
-      .sort((a, b) => b.mtime - a.mtime);
-    for (const { f } of files.slice(keep)) {
-      try { unlinkSync(join(dir, f)); } catch { }
-    }
-  } catch { }
-}
+import { appendFileSync, mkdirSync, writeFileSync } from "fs";
+import { join } from "path";
+import { isWritable, createProtectedPathsResolver, DEFAULT_AGENT_ID } from "./policy/protected-paths.ts";
+import { resolveSecretInputBestEffort, resolveMainAgentModelRef } from "./config.ts";
+import type { NancyConfig } from "./config.ts";
+import { createTelegramNotifier } from "./notifications/telegram.ts";
+import type { ConfirmedTask } from "./confirmation/tasks.ts";
+import { createTaskAuthorization, createPendingConfirmations } from "./confirmation/tasks.ts";
+import type { SubagentRuntime } from "./workers/worker-manager.ts";
+import { createWorkerManager } from "./workers/worker-manager.ts";
+import { createMacroReviewer } from "./analysis/macro-review.ts";
+import { createContextBuilder } from "./analysis/context.ts";
+import { extractCandidateUrl, checkDomainBorder } from "./policy/domain-policy.ts";
+import { fetchBrowserSnapshot, snapshotFilename, uniqueSnapshotPath, pruneSnapshots, MAX_SNAPSHOTS } from "./browser/snapshot.ts";
+import { parseConfirmationRequest, isAffirmativeReply } from "./confirmation/protocol.ts";
+import { parseVerdict } from "./analysis/verdict.ts";
+import { callLlm } from "./analysis/client.ts";
+import { rotateLogIfLarge, logDecision } from "./logging/logger.ts";
+import type { LogIds } from "./logging/logger.ts";
+import {
+  PATH_WRITE_TOOLS, shouldAnalyze, isMainGateAllowed, browserAction, browserActKind,
+  BROWSER_VALUE_ACT_KINDS, WEB_SNAPSHOT_TOOLS,
+} from "./policy/tool-policy.ts";
+import { createSessionState, UNKNOWN_SESSION_KEY } from "./state.ts";
+import { createOperatorPolicy } from "./policy/operator-policy.ts";
 
 export default definePluginEntry({
   id: "nancy",
@@ -467,171 +37,24 @@ export default definePluginEntry({
     // api.pluginConfig holds plugins.entries.nancy.config — distinct from api.config (full openclaw config)
     const nancyConfig = api.pluginConfig as NancyConfig;
 
-    // resolveAgentWorkspaceDir requires an explicit agentId (falls back to the
-    // "main" agent if omitted, which is only correct for single-agent setups) —
-    // so workspace/protected-path resolution is done per agentId and cached,
-    // not computed once globally at startup.
-    const DEFAULT_AGENT_ID = "main";
+    // Standing operator restrictions are read fresh for every judgment. A
+    // mandatory baseline remains compiled into trusted code as a safety floor.
+    const { getPolicyContext } = createOperatorPolicy(api.rootDir ?? ".");
 
-    function buildAgentPaths(agentId: string) {
-      const workspaceDir = api.runtime.agent.resolveAgentWorkspaceDir(api.config, agentId);
-      const PROTECTED_FILES = [
-        { label: "AGENTS.md", path: join(workspaceDir, "AGENTS.md") },
-        { label: "IDENTITY.md", path: join(workspaceDir, "IDENTITY.md") },
-        { label: "MEMORY.md", path: join(workspaceDir, "MEMORY.md") },
-        { label: "nancy/src/index.ts", path: join(api.rootDir ?? ".", "src", "index.ts") },
-        { label: "nancy/openclaw.plugin.json", path: join(api.rootDir ?? ".", "openclaw.plugin.json") },
-      ];
-      const PROTECTED_PATHS = new Map(PROTECTED_FILES.map(f => [resolve(f.path), f.label]));
-      // tasks/ is now written exclusively by NanCy's own confirmation-reply
-      // handling below — the agent must not be able to write its own "confirmed"
-      // record, or it could fabricate user consent that was never given.
-      const TASKS_DIR = resolve(workspaceDir, "tasks");
-      return { workspaceDir, PROTECTED_FILES, PROTECTED_PATHS, TASKS_DIR };
-    }
-
-    type AgentPaths = ReturnType<typeof buildAgentPaths>;
-    const agentPathsCache = new Map<string, AgentPaths>();
-    function getAgentPaths(agentId?: string): AgentPaths {
-      const id = agentId || DEFAULT_AGENT_ID;
-      let cached = agentPathsCache.get(id);
-      if (!cached) {
-        cached = buildAgentPaths(id);
-        agentPathsCache.set(id, cached);
-      }
-      return cached;
-    }
+    // Workspace/protected-path resolution (see policy/protected-paths.ts).
+    const { getAgentPaths, protectedWriteTarget } = createProtectedPathsResolver(api);
 
     // Used by gateway_start's audit and by the message hooks below, neither of
     // which carries an agentId in their event context — they always resolve to
     // the main agent's workspace. before_tool_call resolves per ctx.agentId instead.
     const defaultPaths = getAgentPaths(DEFAULT_AGENT_ID);
 
-    // Only tools that actually write/modify a path can trigger the protected-file
-    // block below. Without this gate, a plain read of e.g. AGENTS.md was refused
-    // too, since protectedWriteTarget only ever looked at the path, never at
-    // whether the call was a write — a real functional bug, not just an
-    // over-strict security posture.
-    const PATH_WRITE_TOOLS = new Set(["write", "edit", "apply_patch"]);
+    // Per-session confirmed-task authorization (see confirmation/tasks.ts).
+    const taskAuth = createTaskAuthorization();
+    const { getCurrentTask } = taskAuth;
 
-    function protectedWriteTarget(event: { params: unknown; derivedPaths?: readonly string[] }, paths: AgentPaths): string | null {
-      const candidates: string[] = [];
-      const p = (event.params as Record<string, unknown>)?.path;
-      if (typeof p === "string") candidates.push(p);
-      if (Array.isArray(event.derivedPaths)) candidates.push(...event.derivedPaths);
-      for (const c of candidates) {
-        const resolved = resolve(paths.workspaceDir, c);
-        const label = paths.PROTECTED_PATHS.get(resolved);
-        if (label) return label;
-        if (resolved === paths.TASKS_DIR || resolved.startsWith(paths.TASKS_DIR + sep)) {
-          return "tasks/ (owned by NanCy's confirmation protocol)";
-        }
-      }
-      return null;
-    }
-
-    // A confirmed task with no natural expiry would let one long-ago "y" reply
-    // keep anchoring every action indefinitely, including well after the
-    // agent's actual work on it should be over. Past this age it's treated as
-    // if nothing were confirmed, the same as if it had never been recorded.
-    const CONFIRMED_TASK_MAX_AGE_MS = 4 * 60 * 60 * 1000;
-
-    // Authorization for a confirmed task lives ONLY here, keyed by the exact
-    // worker session key NanCy itself generates for it (see
-    // spawnWorkerForTask) — never in a shared file like tasks/current.json.
-    // A shared "current" file has no way to tell two concurrently-running
-    // tasks apart: the second task confirmed on the same workerAgentId would
-    // overwrite the first's record, so the first worker's before_tool_call
-    // calls would suddenly start seeing the *second* task as their confirmed
-    // authorization (or vice versa, depending on write order) — a real
-    // cross-task authorization leak between two unrelated running tasks, not
-    // just a cosmetic bug. Keying by the precise session a task was actually
-    // granted to (and only ever populating it via spawnWorkerForTask, never
-    // from anything the agent itself can write) makes that structurally
-    // impossible: two tasks always land under two distinct keys.
-    const taskBySessionKey = new Map<string, ConfirmedTask>();
-
-    // Looks up the task confirmed for this exact session, honoring the same
-    // max-age cutoff as buildAnalysisContext below. Split out so callers that
-    // only need the task id (e.g. for tagging log lines — see logDecision)
-    // don't have to go through the full prompt-context builder.
-    function getCurrentTask(sessionKey: string | undefined): ConfirmedTask | null {
-      if (!sessionKey) return null;
-      const task = taskBySessionKey.get(sessionKey);
-      if (!task) return null;
-      const taskAgeMs = task.ts ? Date.now() - new Date(task.ts).getTime() : NaN;
-      if (!Number.isNaN(taskAgeMs) && taskAgeMs <= CONFIRMED_TASK_MAX_AGE_MS) return task;
-      // Expired — drop it so a stale record can't keep anchoring calls in
-      // this session forever, the same as the old file-based cutoff did.
-      taskBySessionKey.delete(sessionKey);
-      return null;
-    }
-
-    // Shared by before_tool_call and message_sending for building the intent-
-    // alignment prompt context (confirmed task, recent calls, recent reasoning).
-    // sessionKey scopes recent-call/reasoning history to the calling session —
-    // see recentCallsBySession/recentReasoningBySession above.
-    function buildAnalysisContext(paths: AgentPaths, sessionKey: string | undefined, opts: { excludeMostRecentCall?: boolean } = {}) {
-      const currentTask = getCurrentTask(sessionKey);
-      const allCalls = getRecentCalls(sessionKey);
-      const calls = opts.excludeMostRecentCall ? allCalls.slice(0, -1) : allCalls;
-      const reasoning = getRecentReasoning(sessionKey);
-      const taskContext = currentTask ? `Current confirmed task: ${JSON.stringify(currentTask)}. ` : "";
-      const historyContext = calls.length > 0
-        ? `Recent tool call history (oldest first): ${JSON.stringify(calls)}. `
-        : "";
-      const reasoningContext = reasoning.length > 0
-        ? `Recent agent reasoning/thinking (Claude thinking blocks, newest last): ${JSON.stringify(reasoning)}. `
-        : "";
-      const protectedFilesContext = `Protected files that must never be overwritten, moved, or deleted by any means (including shell redirection, cp/mv, sed -i, or any other indirect method): ${paths.PROTECTED_FILES.map(f => f.label).join(", ")}. `;
-      return { taskContext, historyContext, reasoningContext, protectedFilesContext };
-    }
-
-    // Resolved once and reused by gateway_start's boot message and by
-    // notifyBlocked below, so live block events can reach the operator too.
-    const telegramCfg = (api.config as Record<string, unknown>)?.channels as Record<string, unknown> | undefined;
-    const telegram = (telegramCfg?.telegram as Record<string, unknown>) ?? undefined;
-    const telegramBotToken = resolveSecretInputBestEffort(telegram?.botToken);
-    const telegramChatId = (telegram?.allowFrom as string[] | undefined)?.[0];
-    if (telegram?.botToken && !telegramBotToken) {
-      console.warn("[nancy] ⚠️  telegram.botToken is a secret reference NanCy could not resolve (only source:\"env\" refs are supported) — Telegram alerts disabled");
-    }
-    // Everything (blocks, termination, boot status) is always fully written
-    // to nancy.log/nancy-analysis.log regardless of this — it only gates the
-    // live phone push. Explicit opt-out: telegramAlerts: false.
-    const telegramAlertsEnabled = nancyConfig.telegramAlerts !== false && !!telegramBotToken && !!telegramChatId;
-    // Separate opt-out from telegramAlerts: an operator may want blocks/status
-    // pushes off (noisy) while still wanting to know how each confirmed task
-    // actually turned out.
-    const telegramTaskReportsEnabled = nancyConfig.telegramTaskReports !== false && !!telegramBotToken && !!telegramChatId;
-
-    // Telegram's message text cap is 4096 chars; leave headroom for the
-    // surrounding status/labels built around this text.
-    function truncateForTelegram(text: string, max: number): string {
-      return text.length > max ? `${text.slice(0, max)}…` : text;
-    }
-
-    // Live notification for every block, including CLARIFY (which also fails
-    // closed — see before_tool_call below for why it doesn't pause for
-    // approval).
-    //
-    // A model that doesn't stop after a block will often retry the same
-    // blocked action many times in a row (the LLM verdict's reason text
-    // varies call to call, so it can't be deduped on the message itself).
-    // Every retry still hits the block and gets logged, but only the first
-    // Telegram push per (session, block kind) within the window goes out —
-    // otherwise a benign retry loop reads as an alarming flood on the user's
-    // phone even though nothing was ever actually let through.
-    const recentBlockAlerts = new Map<string, number>();
-    const BLOCK_ALERT_DEBOUNCE_MS = 2 * 60 * 1000;
-    function notifyBlocked(text: string, dedupeKey: string): void {
-      if (!telegramAlertsEnabled) return;
-      const now = Date.now();
-      const last = recentBlockAlerts.get(dedupeKey);
-      if (last && now - last < BLOCK_ALERT_DEBOUNCE_MS) return;
-      recentBlockAlerts.set(dedupeKey, now);
-      telegramAlert(telegramBotToken!, telegramChatId!, `🛑 *NanCy blocked an action*\n${text}`).catch(() => { });
-    }
+    // Telegram alerting/status pushes (see notifications/telegram.ts).
+    const notifier = createTelegramNotifier(api, nancyConfig);
 
     function getSubagentRuntime(): SubagentRuntime {
       return (api.runtime as unknown as { subagent: SubagentRuntime }).subagent;
@@ -645,175 +68,21 @@ export default definePluginEntry({
       return !!nancyConfig.mainSessionKey && sessionKey === nancyConfig.mainSessionKey;
     }
 
-    // Per-session state for the main/worker split and behavioral review below.
-    const terminatedSessions = new Map<string, boolean>();
-    const callCounters = new Map<string, number>();
-    const lastActivityMs = new Map<string, number>();
+    // Per-session state for the main/worker split, behavioral review, cron
+    // correlation, and recent call/reasoning history (see state.ts).
+    const state = createSessionState();
 
-    function touchActivity(sessionKey: string): void {
-      lastActivityMs.set(sessionKey, Date.now());
-    }
+    // Worker session spawn/wait/cleanup (see workers/worker-manager.ts).
+    const { spawnWorkerForTask } = createWorkerManager({
+      nancyConfig, logFile, getAgentPaths, taskAuth, notifier, getSubagentRuntime,
+    });
 
-    // waitForRun is re-issued up to this many times (each with its own
-    // timeoutMs budget) before NanCy gives up waiting — see the "timeout"/
-    // "pending" handling below. Total worst-case wait: WORKER_WAIT_TIMEOUT_MS
-    // * WORKER_MAX_WAIT_ATTEMPTS.
-    const WORKER_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
-    const WORKER_MAX_WAIT_ATTEMPTS = 3;
+    // Periodic behavioral review of a session's recent call history (see
+    // analysis/macro-review.ts).
+    const { runMacroReview } = createMacroReviewer({ nancyConfig, analysisLog, logFile, state, notifier, getPolicyContext });
 
-    // Spawns an isolated worker session to execute a freshly confirmed task,
-    // then deletes that session once the run finishes so its transcript can't
-    // accumulate context across tasks (each task gets a clean session).
-    async function spawnWorkerForTask(task: ConfirmedTask): Promise<void> {
-      if (!nancyConfig.workerAgentId) return;
-      const taskId = task.id;
-      const workerSessionKey = `agent:${nancyConfig.workerAgentId}:task-${taskId}`;
-
-      // ${taskId}.json is written purely as an on-disk audit record — it is
-      // NOT what grants the worker its authorization (see taskBySessionKey
-      // above). If even that record can't be written, treat the environment
-      // as unreliable enough that the worker must not run at all rather than
-      // executing with an authorization NanCy couldn't durably account for.
-      try {
-        const workerPaths = getAgentPaths(nancyConfig.workerAgentId);
-        mkdirSync(workerPaths.TASKS_DIR, { recursive: true });
-        writeFileSync(join(workerPaths.TASKS_DIR, `${taskId}.json`), JSON.stringify(task, null, 2));
-      } catch (err) {
-        appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "worker_task_copy_error", taskId, error: String(err) }) + "\n");
-        console.warn(`[nancy] ⚠️  Failed to write task record for ${taskId} — refusing to spawn a worker for it: ${String(err)}`);
-        return;
-      }
-
-      // Grant authorization to this exact session BEFORE spawning it, so
-      // there is no window where the worker session exists but its first
-      // before_tool_call would find no confirmed task yet.
-      taskBySessionKey.set(workerSessionKey, task);
-
-      try {
-        const subagent = getSubagentRuntime();
-        const result = await subagent.run({
-          sessionKey: workerSessionKey,
-          message: `Execute this confirmed task:\n\n${task.description}\n\nTask ID: ${taskId}`,
-          idempotencyKey: taskId,
-        });
-        appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "worker_spawned", taskId, runId: result.runId, workerSessionKey }) + "\n");
-        console.log(`[nancy] ✓ Worker spawned for task ${taskId} → runId ${result.runId}`);
-
-        (async () => {
-          // waitForRun returning "timeout" (or "pending") means the wait call
-          // itself gave up — it says nothing about whether the worker's run
-          // actually finished. Treating it as done and immediately deleting
-          // the session would tear down a run that's still genuinely in
-          // progress. There's no cancel/stop call on SubagentRuntime, so the
-          // only safe options are to keep waiting or to leave the session
-          // alone — never to clean up on the strength of a timeout alone.
-          let waitResult = await subagent.waitForRun({ runId: result.runId, timeoutMs: WORKER_WAIT_TIMEOUT_MS });
-          let attempt = 1;
-          while ((waitResult.status === "timeout" || waitResult.status === "pending") && attempt < WORKER_MAX_WAIT_ATTEMPTS) {
-            attempt++;
-            appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "worker_wait_retry", taskId, runId: result.runId, status: waitResult.status, attempt }) + "\n");
-            waitResult = await subagent.waitForRun({ runId: result.runId, timeoutMs: WORKER_WAIT_TIMEOUT_MS });
-          }
-
-          appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "worker_done", taskId, runId: result.runId, status: waitResult.status, attempts: attempt }) + "\n");
-
-          if (waitResult.status !== "ok" && waitResult.status !== "error") {
-            // Still not finished after WORKER_MAX_WAIT_ATTEMPTS rounds of
-            // waiting — leave the worker session in place rather than
-            // deleting it out from under a run that may still be executing.
-            // Its task authorization stays live too, for the same reason:
-            // the worker may still legitimately be mid-task, and revoking it
-            // now would make its very next before_tool_call see no confirmed
-            // task at all and get blocked outright.
-            console.warn(`[nancy] ⚠️  worker for task ${taskId} did not finish after extended waiting (status=${waitResult.status}) — leaving session ${workerSessionKey} in place, skipping cleanup`);
-            appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "worker_wait_exhausted", taskId, runId: result.runId, status: waitResult.status, workerSessionKey }) + "\n");
-            return;
-          }
-
-          if (telegramTaskReportsEnabled) {
-            const ok = waitResult.status === "ok";
-            const reply = waitResult.terminalReply;
-            const replyText = reply && reply.disposition === "visible" ? reply.text : null;
-            const lines = [
-              `${ok ? "✅" : "❌"} *NanCy: confirmed task ${ok ? "finished" : "failed"}*`,
-              `Task: ${truncateForTelegram(task.description, 300)}`,
-            ];
-            if (!ok && waitResult.error) lines.push(`Error: ${truncateForTelegram(waitResult.error, 300)}`);
-            lines.push(replyText ? truncateForTelegram(replyText, 3000) : "(worker produced no visible final reply)");
-            telegramAlert(telegramBotToken!, telegramChatId!, lines.join("\n\n")).catch(() => { });
-          }
-
-          try {
-            await subagent.deleteSession({ sessionKey: workerSessionKey, deleteTranscript: false });
-            appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "worker_session_deleted", taskId, workerSessionKey }) + "\n");
-            console.log(`[nancy] ✓ Worker session cleaned up for task ${taskId}`);
-          } catch (err) {
-            appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "worker_cleanup_error", taskId, error: String(err) }) + "\n");
-          } finally {
-            // The run itself has already concluded (ok/error) by this point
-            // regardless of whether deleteSession succeeded — nothing should
-            // be able to reuse this task's authorization afterward, whether
-            // via a fresh session that happens to reuse workerSessionKey or
-            // otherwise (see the "later new session" regression test).
-            taskBySessionKey.delete(workerSessionKey);
-          }
-        })().catch((err: unknown) => {
-          appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "worker_cleanup_error", taskId, error: String(err) }) + "\n");
-          taskBySessionKey.delete(workerSessionKey);
-        });
-      } catch (err) {
-        // subagent.run() itself threw — the worker session never really
-        // started, so nothing should remain authorized under its key.
-        taskBySessionKey.delete(workerSessionKey);
-        appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "worker_spawn_error", taskId, error: String(err) }) + "\n");
-        console.warn(`[nancy] ⚠️  Failed to spawn worker for task ${taskId}: ${err}`);
-      }
-    }
-
-    // Periodic behavioral review of a whole session's recent call history —
-    // independent of and in addition to the per-call ALLOW/BLOCK/CLARIFY checks
-    // in before_tool_call. Looks for *patterns* a single-call verdict can't see
-    // (loops, slow privilege escalation, repeated blocked attempts) and, only
-    // for a clear sustained pattern, terminates the session outright.
-    async function runMacroReview(sessionKey: string, calls: Array<{ ts: string; toolName: string; params: unknown }>): Promise<void> {
-      const analysisCfg = nancyConfig.analysis;
-      if (!analysisCfg) return;
-      const prompt = `You are NanCy SSIL performing a periodic behavioral review of an AI agent session.
-Look for concerning patterns: agent stuck in a loop, slow privilege escalation, repeated blocked attempts, unusual tool sequences, or a sustained attempt to bypass NanCy's own checks.
-
-Session: ${sessionKey}
-Recent tool calls (${calls.length} entries, oldest first):
-${JSON.stringify(calls, null, 2)}
-
-Reply ONLY with valid JSON — no other text:
-{"verdict":"ok","reason":"<one sentence>"}
-{"verdict":"suspicious","reason":"<one sentence>"}
-{"verdict":"terminate","reason":"<one sentence>"}  — use only for a clear, sustained pattern, never a single risky call`;
-      try {
-        const response = await callLlm(analysisCfg, prompt);
-        if (!response) return;
-        const match = response.match(/\{[\s\S]*?\}/);
-        if (!match) return;
-        const parsed = JSON.parse(match[0]) as { verdict?: string; reason?: string };
-        appendFileSync(analysisLog, JSON.stringify({ ts: new Date().toISOString(), event: "macro_review", sessionKey, verdict: parsed.verdict, reason: parsed.reason }) + "\n");
-
-        if (parsed.verdict === "suspicious") {
-          console.warn(`[nancy] ⚠️  macro-review flagged session ${sessionKey} as suspicious: ${parsed.reason}`);
-          if (telegramAlertsEnabled) {
-            telegramAlert(telegramBotToken!, telegramChatId!, `⚠️ *NanCy: suspicious pattern detected*\nSession: \`${sessionKey}\`\nReason: ${parsed.reason}`).catch(() => { });
-          }
-        }
-
-        if (parsed.verdict === "terminate") {
-          terminatedSessions.set(sessionKey, true);
-          console.warn(`[nancy] ⛔ macro-review TERMINATED session ${sessionKey}: ${parsed.reason}`);
-          appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "session_terminated", sessionKey, reason: parsed.reason }) + "\n");
-          if (telegramAlertsEnabled) {
-            telegramAlert(telegramBotToken!, telegramChatId!, `⛔ *NanCy: session TERMINATED*\nSession: \`${sessionKey}\`\nReason: ${parsed.reason}`).catch(() => { });
-          }
-        }
-      } catch { }
-    }
+    // Intent-alignment prompt context builder (see analysis/context.ts).
+    const { buildAnalysisContext } = createContextBuilder({ taskAuth, state, getPolicyContext });
 
     api.on("gateway_start", (_event, _ctx) => {
       rotateLogIfLarge(logFile);
@@ -850,7 +119,7 @@ Reply ONLY with valid JSON — no other text:
         appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "test_mode_enabled" }) + "\n");
       }
 
-      if (telegramAlertsEnabled) {
+      if (notifier.alertsEnabled) {
         const statusLine = writable.length > 0
           ? `⚠️ *SECURITY WARNING*: unprotected files: ${writable.map(f => f.label).join(", ")}`
           : `✅ Protected files are read-only`;
@@ -859,7 +128,7 @@ Reply ONLY with valid JSON — no other text:
           : `⚠️ Analysis: not configured`;
         const splitStatus = nancyConfig.mainSessionKey ? `✅ Main/worker split: enabled` : `⚠️ Main/worker split: disabled`;
         const testModeStatus = nancyConfig.testMode ? `\n🧪 *TEST MODE*: no tool call or outbound message can actually execute/send` : "";
-        telegramAlert(telegramBotToken!, telegramChatId!, `🛡 *NanCy online*\n${statusLine}\n${analysisStatus}\n${splitStatus}${testModeStatus}`).catch(() => { });
+        notifier.sendAlert(`🛡 *NanCy online*\n${statusLine}\n${analysisStatus}\n${splitStatus}${testModeStatus}`);
       }
 
       // Idle reset: periodically check the main session's last activity and
@@ -870,9 +139,9 @@ Reply ONLY with valid JSON — no other text:
         const idleMinutes = nancyConfig.mainSessionIdleMinutes ?? 60;
         const idleMs = idleMinutes * 60 * 1000;
         setInterval(() => {
-          const last = lastActivityMs.get(mainKey);
+          const last = state.lastActivityMs.get(mainKey);
           if (!last || Date.now() - last < idleMs) return;
-          lastActivityMs.delete(mainKey);
+          state.lastActivityMs.delete(mainKey);
           getSubagentRuntime().deleteSession({ sessionKey: mainKey, deleteTranscript: false })
             .then(() => {
               appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "main_session_idle_reset", sessionKey: mainKey, idleMinutes }) + "\n");
@@ -901,12 +170,12 @@ Reply ONLY with valid JSON — no other text:
     // — every tool call in it — completely ungated, because
     // sessionTriggerByKey had no entry yet when before_tool_call ran.
     api.on("llm_input", (event, ctx) => {
-      if (ctx.sessionKey && ctx.trigger) sessionTriggerByKey.set(ctx.sessionKey, ctx.trigger);
+      if (ctx.sessionKey && ctx.trigger) state.sessionTriggerByKey.set(ctx.sessionKey, ctx.trigger);
       appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "llm_input", sessionKey: ctx.sessionKey, trigger: ctx.trigger, provider: event.provider, model: event.model }) + "\n");
     });
 
     api.on("llm_output", (event, ctx) => {
-      if (ctx.sessionKey && ctx.trigger) sessionTriggerByKey.set(ctx.sessionKey, ctx.trigger);
+      if (ctx.sessionKey && ctx.trigger) state.sessionTriggerByKey.set(ctx.sessionKey, ctx.trigger);
       appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "llm_output", sessionKey: ctx.sessionKey, trigger: ctx.trigger, provider: event.provider, model: event.model, texts: event.assistantTexts }) + "\n");
     });
 
@@ -924,12 +193,12 @@ Reply ONLY with valid JSON — no other text:
       if (isReasoning) {
         const reasoningText = content.slice("Reasoning:".length).trim();
         console.log(`[nancy] reasoning: ${reasoningText.slice(0, 120).trim()}…`);
-        pushRecentReasoning(ctx.sessionKey, { ts, text: reasoningText });
+        state.pushRecentReasoning(ctx.sessionKey, { ts, text: reasoningText });
         logDecision(analysisLog, ts, "reasoning", logIds, { text: content });
       } else {
         console.log(`[nancy] outbound: ${content.slice(0, 100).trim()}${content.length > 100 ? "…" : ""}`);
       }
-      logDecision(logFile, ts, "message_sending", logIds, { channel: ctx.channelId ?? "unknown", text: content, trigger: ctx.sessionKey ? sessionTriggerByKey.get(ctx.sessionKey) : undefined });
+      logDecision(logFile, ts, "message_sending", logIds, { channel: ctx.channelId ?? "unknown", text: content, trigger: ctx.sessionKey ? state.sessionTriggerByKey.get(ctx.sessionKey) : undefined });
 
       // Intent Anchoring: the agent only *asks* for confirmation — NanCy is the
       // one that decides, from the user's actual reply below, whether it was given.
@@ -938,7 +207,7 @@ Reply ONLY with valid JSON — no other text:
         if (!ctx.sessionKey) {
           console.warn(`[nancy] ⚠️  confirmation request seen with no sessionKey to correlate a reply against — ignoring`);
         } else {
-          const existing = pendingConfirmations.get(ctx.sessionKey);
+          const existing = confirmations.pending.get(ctx.sessionKey);
           if (existing) {
             console.warn(`[nancy] confirmation id=${existing.id} superseded by a new request (id=${confirmationRequest.id}) before it was answered`);
             logDecision(logFile, ts, "confirmation_superseded", logIds, { previousId: existing.id, newId: confirmationRequest.id });
@@ -946,7 +215,7 @@ Reply ONLY with valid JSON — no other text:
           // rawContent/messageId let message_sent (below) and message_received
           // correlate the eventual reply to this exact delivered message, not
           // just to "some reply in the same session" — see message_received.
-          pendingConfirmations.set(ctx.sessionKey, { ...confirmationRequest, ts: Date.now(), rawContent: content });
+          confirmations.pending.set(ctx.sessionKey, { ...confirmationRequest, ts: Date.now(), rawContent: content });
           console.log(`[nancy] confirmation requested: id=${confirmationRequest.id}`);
           logDecision(logFile, ts, "confirmation_requested", logIds, { id: confirmationRequest.id, description: confirmationRequest.description });
         }
@@ -990,8 +259,8 @@ Reply ONLY with valid JSON — no other text:
         return;
       }
 
-      const { taskContext, historyContext, reasoningContext, protectedFilesContext } = buildAnalysisContext(defaultPaths, ctx.sessionKey);
-      const prompt = `You are a stateless security observer enforcing Intent Anchoring for an AI agent. You have no memory of previous calls beyond what is given here. ${taskContext}${historyContext}${reasoningContext}${protectedFilesContext}The agent is about to send this outbound message via channel "${ctx.channelId ?? "unknown"}" to "${event.to}": ${JSON.stringify(content)}.
+      const { policyContext, taskContext, historyContext, reasoningContext, protectedFilesContext } = buildAnalysisContext(defaultPaths, ctx.sessionKey);
+      const prompt = `You are a stateless security observer enforcing Intent Anchoring for an AI agent. You have no memory of previous calls beyond what is given here. ${policyContext}${taskContext}${historyContext}${reasoningContext}${protectedFilesContext}The agent is about to send this outbound message via channel "${ctx.channelId ?? "unknown"}" to "${event.to}": ${JSON.stringify(content)}.
 
 Decide whether this outbound message should be sent, and respond in EXACTLY this format (nothing before it):
 VERDICT: ALLOW|BLOCK|CLARIFY
@@ -1009,7 +278,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
           // uncertain CLARIFY is treated the same as BLOCK rather than let through.
           console.warn(`[nancy] 🛑 BLOCKED outbound message (${verdict}): ${reason}`);
           logDecision(logFile, ts, "message_blocked", logIds, { verdict, channel: ctx.channelId ?? "unknown", to: event.to, reason });
-          notifyBlocked(`Outbound message to ${event.to} via ${ctx.channelId ?? "unknown"}: ${reason}`, `${ctx.sessionKey ?? "unknown"}:message:${ctx.channelId ?? "unknown"}`);
+          notifier.notifyBlocked(`Outbound message to ${event.to} via ${ctx.channelId ?? "unknown"}: ${reason}`, `${ctx.sessionKey ?? "unknown"}:message:${ctx.channelId ?? "unknown"}`);
           return { cancel: true, cancelReason: reason || "NanCy blocked this message: it did not match the confirmed task." };
         }
 
@@ -1041,11 +310,11 @@ Use BLOCK when the message contains data or requests that were not authorized by
     // unrelated "y" reply in the same session.
     api.on("message_sent", (event, ctx) => {
       if (!ctx.sessionKey) return;
-      const pending = pendingConfirmations.get(ctx.sessionKey);
+      const pending = confirmations.pending.get(ctx.sessionKey);
       if (!pending || event.content !== pending.rawContent) return;
 
       if (!event.success) {
-        pendingConfirmations.delete(ctx.sessionKey);
+        confirmations.pending.delete(ctx.sessionKey);
         console.warn(`[nancy] confirmation id=${pending.id} delivery failed — invalidated (${event.error ?? "unknown error"})`);
         logDecision(logFile, new Date().toISOString(), "confirmation_delivery_failed", { sessionKey: ctx.sessionKey, runId: ctx.runId }, { id: pending.id, error: event.error });
         return;
@@ -1064,10 +333,10 @@ Use BLOCK when the message contains data or requests that were not authorized by
       console.log(`[nancy] inbound ${channel} ${from} (${content.length} chars)`);
       appendFileSync(logFile, JSON.stringify({ ts, event: "message_received", channel, from, contentLen: content.length }) + "\n");
 
-      if (ctx.sessionKey) touchActivity(ctx.sessionKey);
+      if (ctx.sessionKey) state.touchActivity(ctx.sessionKey);
 
       if (!ctx.sessionKey) return;
-      const pending = pendingConfirmations.get(ctx.sessionKey);
+      const pending = confirmations.pending.get(ctx.sessionKey);
       if (!pending) return;
 
       // When both sides carry reply-threading info, require an exact match —
@@ -1077,9 +346,9 @@ Use BLOCK when the message contains data or requests that were not authorized by
       if (pending.messageId && event.replyToId !== undefined && String(event.replyToId) !== String(pending.messageId)) {
         return;
       }
-      pendingConfirmations.delete(ctx.sessionKey);
+      confirmations.pending.delete(ctx.sessionKey);
 
-      if (Date.now() - pending.ts > CONFIRMATION_TTL_MS) {
+      if (Date.now() - pending.ts > confirmations.TTL_MS) {
         console.warn(`[nancy] confirmation id=${pending.id} expired before a reply arrived`);
         appendFileSync(logFile, JSON.stringify({ ts, event: "confirmation_expired", sessionKey: ctx.sessionKey, id: pending.id }) + "\n");
         return;
@@ -1097,7 +366,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
       // agent's workspace (see defaultPaths above). This file is an audit
       // record only, not a grant of authorization — the worker session that
       // actually executes the task gets its authorization directly, keyed to
-      // its own session (see spawnWorkerForTask/taskBySessionKey).
+      // its own session (see spawnWorkerForTask/confirmation/tasks.ts).
       try {
         mkdirSync(defaultPaths.TASKS_DIR, { recursive: true });
         const record: ConfirmedTask = { id: pending.id, ts: new Date().toISOString(), description: pending.description, status: "confirmed", openclaw_task_id: null };
@@ -1114,235 +383,20 @@ Use BLOCK when the message contains data or requests that were not authorized by
       }
     });
 
-    // Rolling buffers of tool calls and reasoning, keyed by sessionKey so one
-    // session's history never leaks into another session's Intent Anchoring
-    // prompt (they used to be flat, session-unaware arrays — a real bug when
-    // more than one session is active against the same gateway). Events with
-    // no sessionKey (message_sending/message_received never carry one) share
-    // a single "unknown" bucket, matching the pre-existing single-session
-    // assumption for those hooks only.
-    const UNKNOWN_SESSION_KEY = "unknown";
-    const recentCallsBySession = new Map<string, Array<{ ts: string; toolName: string; params: unknown }>>();
-    const recentReasoningBySession = new Map<string, Array<{ ts: string; text: string }>>();
+    // Confirmation requests awaiting a y/n reply (see confirmation/tasks.ts).
+    const confirmations = createPendingConfirmations();
 
-    // Cron-run correlation, keyed by sessionKey. before_tool_call's ctx
-    // (PluginHookToolContext) and message_sending's ctx (PluginHookMessageContext)
-    // never carry a `trigger` field — verified against openclaw@2026.9.4's
-    // compiled hook-context builders (buildToolContext in
-    // agent-tools.before-tool-call, toPluginMessageContext in
-    // message-hook-mappers): both allowlist their fields explicitly and neither
-    // copies `trigger` through, even though the richer internal HookContext has
-    // it. `llm_output`'s ctx (PluginHookAgentContext), by contrast, is built via
-    // buildAgentHookContext, which does forward `trigger` — so it's captured
-    // there (below) and looked up here by sessionKey when gating tool calls.
-    const sessionTriggerByKey = new Map<string, string>();
-
-    function isCronTrigger(sessionKey: string | undefined): boolean {
-      if (!sessionKey) return false;
-      return sessionTriggerByKey.get(sessionKey) === "cron";
-    }
-
-    function pushRecentCall(sessionKey: string | undefined, entry: { ts: string; toolName: string; params: unknown }): void {
-      const key = sessionKey ?? UNKNOWN_SESSION_KEY;
-      const arr = recentCallsBySession.get(key) ?? [];
-      arr.push(entry);
-      if (arr.length > 20) arr.shift();
-      recentCallsBySession.set(key, arr);
-    }
-
-    function pushRecentReasoning(sessionKey: string | undefined, entry: { ts: string; text: string }): void {
-      const key = sessionKey ?? UNKNOWN_SESSION_KEY;
-      const arr = recentReasoningBySession.get(key) ?? [];
-      arr.push(entry);
-      if (arr.length > 3) arr.shift();
-      recentReasoningBySession.set(key, arr);
-    }
-
-    function getRecentCalls(sessionKey: string | undefined): Array<{ ts: string; toolName: string; params: unknown }> {
-      return recentCallsBySession.get(sessionKey ?? UNKNOWN_SESSION_KEY) ?? [];
-    }
-
-    function getRecentReasoning(sessionKey: string | undefined): Array<{ ts: string; text: string }> {
-      return recentReasoningBySession.get(sessionKey ?? UNKNOWN_SESSION_KEY) ?? [];
-    }
-
-    // Confirmation requests sent to the user, awaiting their y/n reply, keyed by
-    // sessionKey. rawContent/messageId (set once message_sent confirms delivery)
-    // enable strict reply-to-message correlation on channels that support it.
-    const pendingConfirmations = new Map<string, { id: string; description: string; ts: number; rawContent: string; messageId?: string }>();
-    const CONFIRMATION_TTL_MS = 15 * 60 * 1000;
-
-    // Without this, recentCallsBySession/recentReasoningBySession/pendingConfirmations
-    // would grow one entry per sessionKey forever on a long-running gateway that
-    // sees many short-lived sessions — a real (if slow) memory leak. Also clears
-    // this session's macro-review/termination/idle-activity state for the same reason.
+    // Without this, the per-session state in state.ts/confirmation/tasks.ts
+    // would grow one entry per sessionKey forever on a long-running gateway
+    // that sees many short-lived sessions — a real (if slow) memory leak.
     api.on("session_end", (event, ctx) => {
       const key = ctx.sessionKey ?? UNKNOWN_SESSION_KEY;
-      recentCallsBySession.delete(key);
-      recentReasoningBySession.delete(key);
-      pendingConfirmations.delete(key);
-      callCounters.delete(key);
-      terminatedSessions.delete(key);
-      lastActivityMs.delete(key);
-      sessionTriggerByKey.delete(key);
-      taskBySessionKey.delete(key);
-      const blockAlertPrefix = `${key}:`;
-      for (const alertKey of recentBlockAlerts.keys()) {
-        if (alertKey.startsWith(blockAlertPrefix)) recentBlockAlerts.delete(alertKey);
-      }
+      state.clearSession(key);
+      confirmations.pending.delete(key);
+      taskAuth.revokeTask(key);
+      notifier.clearSessionBlockAlerts(key);
       appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "session_end", sessionId: (event as Record<string, unknown>)?.sessionId, sessionKey: ctx.sessionKey }) + "\n");
     });
-
-    // Tool names verified against the actual installed openclaw@2026.9.4
-    // package's own tool registry (core-tool-factory-descriptors.ts's
-    // CORE_TOOL_FACTORY_DESCRIPTORS) and the browser/computer extension
-    // schemas — not guessed. "shell" and "bash" (from an earlier version of
-    // this list) are not real openclaw tool names; the actual shell-family
-    // tools are "exec" and "process" (process controls an already-running
-    // exec session — write/send-keys/paste/kill/etc — so it can drive an
-    // interactive shell one keypress at a time without ever passing through
-    // a "command" string, and needs its own check, not exec's).
-    const ALWAYS_ANALYZE = new Set([
-      "web_fetch", "web_search", "write", "edit",
-      // Real tool (family "shell", same as write/edit) that was previously
-      // missing here entirely: it wasn't hard-blocked anywhere AND wasn't
-      // analyzed, so it executed with zero check of any kind, in every
-      // session type including main/cron.
-      "apply_patch",
-      // The generic outbound-send tool carries the same exfiltration risk
-      // as an outbound channel message, so it gets the same LLM review
-      // before it runs (message_sending separately reviews the actual
-      // channel delivery once this tool call is allowed to proceed).
-      "message",
-    ]);
-    // Skip read-only and harmless shell commands to avoid adding Gemini latency
-    // with no security value. cp/mv were removed from this list — both can
-    // overwrite or relocate arbitrary files and are not safe to exempt.
-    const SAFE_EXEC = /^(ls|pwd|mkdir|echo|cat|head|tail|whoami|date|cd)\b/;
-    // Shell metacharacters that chain, redirect, substitute, or pipe commands.
-    // A prefix match on SAFE_EXEC alone is not enough: "echo hi > AGENTS.md" or
-    // "ls; rm -rf ~" both start with a safe verb but do something else entirely.
-    // Any of these anywhere in the command forces full analysis, regardless of
-    // which verb the command starts with.
-    const SHELL_METACHARACTERS = /[;&|`$(){}<>]|\n/;
-
-    function isSafeExecCommand(cmd: string): boolean {
-      const trimmed = cmd.trim();
-      return SAFE_EXEC.test(trimmed) && !SHELL_METACHARACTERS.test(trimmed);
-    }
-    // process's "list"/"poll"/"log" actions only read state (running
-    // processes, output so far); everything else (write/send-keys/paste/
-    // submit/kill/clear/remove) drives or tears down a live process.
-    const SAFE_PROCESS_ACTIONS = new Set(["list", "poll", "log"]);
-
-    // The browser tool's actual dispatch field is `action` (top-level), with
-    // interactive act-kinds nested under a separate `kind` field only when
-    // action:"act" — NOT a `command` field. An earlier version of this file
-    // read a nonexistent `command` field for browser calls, which silently
-    // made every single browser call — in every session type, main/cron
-    // included — look like a no-op to both this analysis gate and the old
-    // MAIN_BROWSER_BLOCK_CMDS check: browser was never analyzed and never
-    // blocked, regardless of what it actually did.
-    function browserAction(params: unknown): string {
-      return String((params as Record<string, unknown>)?.action ?? "");
-    }
-    function browserActKind(params: unknown): string {
-      return String((params as Record<string, unknown>)?.kind ?? "");
-    }
-    // Non-"act" browser actions that themselves navigate, transfer files,
-    // change browser/profile state, or otherwise reach beyond a passive read.
-    const BROWSER_INTERACTIVE_ACTIONS = new Set([
-      "start", "stop", "importprofile", "open", "navigate", "focus", "close",
-      "download", "waitfordownload", "upload", "dialog", "emulate", "pdf",
-    ]);
-    // action:"act" kinds that interact with or mutate the page. "batch" is
-    // included since it can itself nest any of these.
-    const BROWSER_INTERACTIVE_ACT_KINDS = new Set([
-      "batch", "click", "clickCoords", "type", "press", "hover",
-      "scrollIntoView", "drag", "select", "fill", "resize", "evaluate", "close",
-    ]);
-    // act-kinds whose params carry the actual value being written into the
-    // page (a form field's contents, typed text, a selected option). These
-    // get a context-only pre-check first — see before_tool_call below.
-    const BROWSER_VALUE_ACT_KINDS = new Set(["fill", "type", "select"]);
-
-    function shouldAnalyzeBrowser(params: unknown): boolean {
-      const action = browserAction(params);
-      if (action === "act") return BROWSER_INTERACTIVE_ACT_KINDS.has(browserActKind(params));
-      return BROWSER_INTERACTIVE_ACTIONS.has(action);
-    }
-
-    function shouldAnalyze(toolName: string, params: unknown): boolean {
-      if (toolName === "browser") return shouldAnalyzeBrowser(params);
-      if (toolName === "exec") {
-        const cmd = String((params as Record<string, unknown>)?.command ?? "");
-        return !isSafeExecCommand(cmd);
-      }
-      if (toolName === "process") {
-        const action = String((params as Record<string, unknown>)?.action ?? "");
-        return !SAFE_PROCESS_ACTIONS.has(action);
-      }
-      return ALWAYS_ANALYZE.has(toolName);
-    }
-
-    // Main/cron hard gate: default-deny. The main (chat) session and any
-    // cron-triggered run (see isCronTrigger) must never execute real work
-    // directly — only pure, side-effect-free reads. This used to be a
-    // *blocklist* (MAIN_ALWAYS_BLOCK/MAIN_BROWSER_BLOCK_CMDS): any tool NOT
-    // named in it fell through completely unchecked, so a tool simply
-    // missing from the list — apply_patch among them — got free execution
-    // by default, and stayed that way even once the analysis gate above
-    // covered it, since main/cron sessions never reach that gate at all for
-    // a tool this one doesn't name.
-    //
-    // Flipped to an allowlist: only the tool names / sub-actions enumerated
-    // below may run at all in the main/cron gate; every other tool — every
-    // known dangerous one (write, edit, apply_patch, exec, process, secrets,
-    // gateway, subagents, sessions_spawn/_send/_yield, conversations_send,
-    // message, automations, github_publish, nodes, mobile_ui, terminal, ...)
-    // and any tool NanCy has never heard of — is blocked outright,
-    // independent of LLM analysis. Real work always goes through a confirmed
-    // task, executed in an isolated worker session instead (see
-    // spawnWorkerForTask).
-    //
-    // Enumerated against openclaw@2026.9.4's actual tool registry
-    // (core-tool-factory-descriptors.ts) and the browser/computer extension
-    // schemas, not guessed. web_fetch/web_search are deliberately NOT on
-    // this list even though they only "read": they reach the open network
-    // under agent-chosen URLs, which is exactly the exfiltration/SSRF shape
-    // Domain Border Control and full LLM analysis exist to catch — main/cron
-    // sessions get neither of those, so those two tools go through a
-    // confirmed task like any other real action.
-    const MAIN_ALLOWED_TOOLS = new Set([
-      "read", "ls",                  // local file/dir reads
-      "view_image",                  // view an already-produced image
-      "get_goal", "session_status",  // read own configured goal / session state
-      "sessions_list", "sessions_history", "sessions_search", // read session metadata
-      "agents_list",                 // read configured agents
-      "conversations_list",          // read channel/conversation metadata
-      "github_identity_status",      // read auth status
-      "transcripts",                 // read a transcript
-    ]);
-    // "browser" and "computer" are single tools whose action space mixes
-    // read-only observation with real interaction, so they're gated by
-    // sub-action instead of by tool name.
-    const MAIN_ALLOWED_BROWSER_ACTIONS = new Set([
-      "snapshot", "screenshot", "text", "tabs", "console", "requests", "errors", "status", "doctor",
-    ]);
-    // Exactly openclaw@2026.9.4's own LOCAL_ACTIONS constant for the computer
-    // tool (src/agents/tools/computer-tool.ts) — its own designation for the
-    // only actions that don't target or mutate a window, browser, or element.
-    const MAIN_ALLOWED_COMPUTER_ACTIONS = new Set(["screenshot", "wait"]);
-
-    function isMainGateAllowed(toolName: string, params: unknown): boolean {
-      if (MAIN_ALLOWED_TOOLS.has(toolName)) return true;
-      if (toolName === "browser") return MAIN_ALLOWED_BROWSER_ACTIONS.has(browserAction(params));
-      if (toolName === "computer") {
-        const action = String((params as Record<string, unknown>)?.action ?? "");
-        return MAIN_ALLOWED_COMPUTER_ACTIONS.has(action);
-      }
-      return false;
-    }
 
     api.on("before_tool_call", async (event, ctx) => {
       const ts = new Date().toISOString();
@@ -1353,16 +407,16 @@ Use BLOCK when the message contains data or requests that were not authorized by
       // carries the same sessionKey/runId/toolCallId/taskId, letting concurrent
       // calls (parallel sessions, parallel workers) be told apart in the logs.
       const logIds: LogIds = { sessionKey: ctx.sessionKey, runId: ctx.runId, toolCallId: ctx.toolCallId, taskId: getCurrentTask(ctx.sessionKey)?.id };
-      logDecision(logFile, ts, "before_tool_call", logIds, { toolName: event.toolName, params: event.params, trigger: sessionTriggerByKey.get(sessionKey) });
-      touchActivity(sessionKey);
+      logDecision(logFile, ts, "before_tool_call", logIds, { toolName: event.toolName, params: event.params, trigger: state.sessionTriggerByKey.get(sessionKey) });
+      state.touchActivity(sessionKey);
 
       // Hard block, independent of LLM analysis: once a session is terminated
       // by runMacroReview's behavioral review, nothing it does is trusted again.
-      if (terminatedSessions.get(sessionKey)) {
+      if (state.terminatedSessions.get(sessionKey)) {
         return { block: true, blockReason: "NanCy SSIL: this session has been terminated due to a sustained security violation. No further actions are permitted." };
       }
 
-      pushRecentCall(ctx.sessionKey, { ts, toolName: event.toolName, params: event.params });
+      state.pushRecentCall(ctx.sessionKey, { ts, toolName: event.toolName, params: event.params });
 
       // Hard block, independent of LLM analysis: the agent must never be able to
       // rewrite its own instructions, identity, memory, or NanCy's own code/config.
@@ -1379,7 +433,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
         // unlike a write to AGENTS.md/IDENTITY.md/MEMORY.md/NanCy's own code,
         // which genuinely warrants a live alert.
         if (!protectedLabel.startsWith("tasks/")) {
-          notifyBlocked(`${event.toolName}: ${reason}`, `${sessionKey}:protected:${event.toolName}`);
+          notifier.notifyBlocked(`${event.toolName}: ${reason}`, `${sessionKey}:protected:${event.toolName}`);
         }
         return { block: true, blockReason: reason };
       }
@@ -1392,17 +446,17 @@ Use BLOCK when the message contains data or requests that were not authorized by
         if (domainBlockReason) {
           console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: ${domainBlockReason}`);
           logDecision(logFile, ts, "domain_blocked", logIds, { toolName: event.toolName, url: candidateUrl, reason: domainBlockReason });
-          notifyBlocked(`${event.toolName}: ${domainBlockReason}`, `${sessionKey}:domain:${event.toolName}`);
+          notifier.notifyBlocked(`${event.toolName}: ${domainBlockReason}`, `${sessionKey}:domain:${event.toolName}`);
           return { block: true, blockReason: domainBlockReason };
         }
       }
 
       // Periodic behavioral review of the whole session (not just this call),
       // non-blocking — see runMacroReview.
-      const callCount = (callCounters.get(sessionKey) ?? 0) + 1;
-      callCounters.set(sessionKey, callCount);
+      const callCount = (state.callCounters.get(sessionKey) ?? 0) + 1;
+      state.callCounters.set(sessionKey, callCount);
       if (callCount % 10 === 0) {
-        runMacroReview(sessionKey, getRecentCalls(ctx.sessionKey)).catch(() => { });
+        runMacroReview(sessionKey, state.getRecentCalls(ctx.sessionKey)).catch(() => { });
       }
 
       // Main-session hard gate: the main (chat) session may only retrieve
@@ -1413,7 +467,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
       // a chat exchange where a human could confirm a task either, so an
       // unattended scheduled run must not get free tool access just because its
       // sessionKey isn't mainSessionKey. See isCronTrigger/sessionTriggerByKey above.
-      const cronRun = isCronTrigger(ctx.sessionKey);
+      const cronRun = state.isCronTrigger(ctx.sessionKey);
       if (isMainSession(ctx.sessionKey) || cronRun) {
         if (!isMainGateAllowed(event.toolName, event.params)) {
           const reason = cronRun
@@ -1447,7 +501,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
         logDecision(analysisLog, ts, "analysis_not_configured", logIds, { toolName: event.toolName, error: "analysis not configured" });
         console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: analysis not configured`);
         logDecision(logFile, ts, "blocked_no_analysis", logIds, { toolName: event.toolName });
-        notifyBlocked(reason, `${sessionKey}:no-analysis:${event.toolName}`);
+        notifier.notifyBlocked(reason, `${sessionKey}:no-analysis:${event.toolName}`);
         return { block: true, blockReason: reason };
       }
 
@@ -1470,7 +524,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
         const browserKind = browserAction(event.params) === "act" ? browserActKind(event.params) : "";
         if (BROWSER_VALUE_ACT_KINDS.has(browserKind)) {
           const ctxOnly = buildAnalysisContext(agentPaths, ctx.sessionKey, { excludeMostRecentCall: true });
-          const contextPrompt = `You are a stateless security observer enforcing Intent Anchoring for an AI agent. You have no memory of previous calls beyond what is given here. ${ctxOnly.taskContext}${ctxOnly.historyContext}${ctxOnly.reasoningContext}${snapshotContext}The agent is about to fill in or select a value on the current page (tool: browser, action: act, kind: ${browserKind}). You are NOT shown the value being entered — only the page/form context.
+          const contextPrompt = `You are a stateless security observer enforcing Intent Anchoring for an AI agent. You have no memory of previous calls beyond what is given here. ${ctxOnly.policyContext}${ctxOnly.taskContext}${ctxOnly.historyContext}${ctxOnly.reasoningContext}${snapshotContext}The agent is about to fill in or select a value on the current page (tool: browser, action: act, kind: ${browserKind}). You are NOT shown the value being entered — only the page/form context.
 
 Decide whether this page/form plausibly belongs to the confirmed task, and respond in EXACTLY this format (nothing before it):
 VERDICT: ALLOW|BLOCK|CLARIFY
@@ -1486,7 +540,7 @@ Use BLOCK when this page or form clearly does not belong to the confirmed task (
             if (contextVerdict === "block") {
               console.warn(`[nancy] 🛑 BLOCKED ${event.toolName} (context check, before reading the value): ${contextReason}`);
               logDecision(logFile, ts, "blocked_context", logIds, { toolName: event.toolName, reason: contextReason });
-              notifyBlocked(`${event.toolName}: wrong page/form context, blocked before reading the value — ${contextReason}`, `${sessionKey}:context:${event.toolName}`);
+              notifier.notifyBlocked(`${event.toolName}: wrong page/form context, blocked before reading the value — ${contextReason}`, `${sessionKey}:context:${event.toolName}`);
               return { block: true, blockReason: contextReason || "NanCy blocked this action: the page/form context did not match the confirmed task." };
             }
             if (contextVerdict === "clarify") {
@@ -1496,7 +550,7 @@ Use BLOCK when this page or form clearly does not belong to the confirmed task (
               // after that fails closed and the agent explains why.
               console.warn(`[nancy] 🛑 BLOCKED ${event.toolName} (context check, unclear): ${contextReason}`);
               logDecision(logFile, ts, "blocked_context_clarify", logIds, { toolName: event.toolName, reason: contextReason });
-              notifyBlocked(`${event.toolName}: unclear page/form context — ${contextReason}`, `${sessionKey}:context:${event.toolName}`);
+              notifier.notifyBlocked(`${event.toolName}: unclear page/form context — ${contextReason}`, `${sessionKey}:context:${event.toolName}`);
               return { block: true, blockReason: contextReason || "NanCy blocked this action: the page/form context does not clearly match the confirmed task." };
             }
             // contextVerdict === "allow" — fall through to the full, value-included check below
@@ -1505,14 +559,14 @@ Use BLOCK when this page or form clearly does not belong to the confirmed task (
             const reason = `Could not verify the page/form context for ${event.toolName} (${String(err)}).`;
             console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: context analysis failed, blocking as precaution: ${String(err)}`);
             logDecision(logFile, ts, "blocked_context_error", logIds, { toolName: event.toolName, error: String(err) });
-            notifyBlocked(reason, `${sessionKey}:context-error:${event.toolName}`);
+            notifier.notifyBlocked(reason, `${sessionKey}:context-error:${event.toolName}`);
             return { block: true, blockReason: reason };
           }
         }
       }
 
-      const { taskContext, historyContext, reasoningContext, protectedFilesContext } = buildAnalysisContext(agentPaths, ctx.sessionKey, { excludeMostRecentCall: true });
-      const prompt = `You are a stateless security observer enforcing Intent Anchoring for an AI agent. You have no memory of previous calls beyond what is given here. ${taskContext}${historyContext}${reasoningContext}${protectedFilesContext}${snapshotContext}Tool call being evaluated: ${JSON.stringify(event.params)} (tool: ${event.toolName}).
+      const { policyContext, taskContext, historyContext, reasoningContext, protectedFilesContext } = buildAnalysisContext(agentPaths, ctx.sessionKey, { excludeMostRecentCall: true });
+      const prompt = `You are a stateless security observer enforcing Intent Anchoring for an AI agent. You have no memory of previous calls beyond what is given here. ${policyContext}${taskContext}${historyContext}${reasoningContext}${protectedFilesContext}${snapshotContext}Tool call being evaluated: ${JSON.stringify(event.params)} (tool: ${event.toolName}).
 
 Decide whether this tool call should proceed, and respond in EXACTLY this format (nothing before it):
 VERDICT: ALLOW|BLOCK|CLARIFY
@@ -1529,7 +583,7 @@ Use BLOCK when the action clearly contradicts or exceeds the confirmed task, loo
         if (verdict === "block") {
           console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: ${reason}`);
           logDecision(logFile, ts, "blocked", logIds, { toolName: event.toolName, reason });
-          notifyBlocked(`${event.toolName}: ${reason}`, `${sessionKey}:blocked:${event.toolName}`);
+          notifier.notifyBlocked(`${event.toolName}: ${reason}`, `${sessionKey}:blocked:${event.toolName}`);
           return { block: true, blockReason: reason || "NanCy blocked this action: it did not match the confirmed task." };
         }
 
@@ -1540,7 +594,7 @@ Use BLOCK when the action clearly contradicts or exceeds the confirmed task, loo
           // and the agent explains the block to the user in its own words.
           console.warn(`[nancy] 🛑 BLOCKED ${event.toolName} (unclear): ${reason}`);
           logDecision(logFile, ts, "blocked_clarify", logIds, { toolName: event.toolName, reason });
-          notifyBlocked(`${event.toolName}: ${reason}`, `${sessionKey}:clarify:${event.toolName}`);
+          notifier.notifyBlocked(`${event.toolName}: ${reason}`, `${sessionKey}:clarify:${event.toolName}`);
           return { block: true, blockReason: reason || "NanCy blocked this action: it does not clearly match the confirmed task." };
         }
         if (verdict === "allow" && nancyConfig.testMode) {
@@ -1555,12 +609,10 @@ Use BLOCK when the action clearly contradicts or exceeds the confirmed task, loo
         const reason = `Could not verify the safety of ${event.toolName} (${String(err)}).`;
         console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: analysis failed, blocking as precaution: ${String(err)}`);
         logDecision(logFile, ts, "blocked_analysis_error", logIds, { toolName: event.toolName, error: String(err) });
-        notifyBlocked(reason, `${sessionKey}:analysis-error:${event.toolName}`);
+        notifier.notifyBlocked(reason, `${sessionKey}:analysis-error:${event.toolName}`);
         return { block: true, blockReason: reason };
       }
     });
-
-    const WEB_SNAPSHOT_TOOLS = new Set(["web_fetch"]);
 
     api.on("after_tool_call", (event, _ctx) => {
       // Form submission has no dedicated action — it's act:fill/act:type with

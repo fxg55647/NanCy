@@ -26,10 +26,18 @@ Before any autonomous session begins, the user's explicit intent is captured, co
 
 While the primary Agent (OpenClaw) may be susceptible to "intent drift," hallucinations, or prompt injection, NanCy acts as an **external, stateless observer.** It cross-references every critical action—such as submitting a purchase form or sending an outgoing email—against the anchored intent. If the action does not perfectly align with the original goal, NanCy pulls the plug. All other security features in this framework are built to support and enforce this verification process.
 
+## What This Enables
+
+**One confirmation grants autonomy for one task — not general authority to the agent.**
+
+NanCy turns a user-confirmed task into a temporary semantic authorization boundary covering the worker's tool calls and outbound communication. The worker may choose a dynamic path to complete the task, but it cannot legitimately expand the task itself. This enables useful multi-step autonomy without requiring the user to approve every individual action.
+
+The individual mechanisms have prior art. NanCy's contribution is combining them into a compact OpenClaw workflow: code-owned confirmation, bounded semantic review, deterministic policy controls, and a disposable worker for each confirmed task. See [Where This Fits](#where-this-fits) and [RELATED-WORK.md](./RELATED-WORK.md) for the comparisons and limits of this claim, and [INCIDENTS.md](./INCIDENTS.md) for concrete public failures this design is intended to reduce.
+
 
 ## Key Technical Features
 
-This section separates what actually runs today (✅, in `src/index.ts`) from what is still a design goal (🧭, not in this repository yet). Check the code before relying on any of it — this is early-stage software.
+This section separates what actually runs today (✅, in `src/`) from what is still a design goal (🧭, not in this repository yet). Check the code before relying on any of it — this is early-stage software.
 
 ### 1. Stateless Security Interruption Layer (SSIL) ✅
 
@@ -64,7 +72,7 @@ For `fill`/`type`/`select` specifically — the browser commands whose params ca
 
 ### 6. Write-Protection for Core Configuration ✅
 
-NanCy actively blocks any `write` or `edit` tool call whose target path resolves to `AGENTS.md`, `IDENTITY.md`, `MEMORY.md`, NanCy's own `src/index.ts` / `openclaw.plugin.json`, or anywhere under `tasks/` (now written exclusively by NanCy itself, see #2) — this block is unconditional and does not depend on the LLM analysis being configured or correct. Separately, at startup NanCy also audits whether the individual protected files are OS-writable and warns if they are (`chmod`-level protection is still recommended as defense in depth, since the audit only warns and doesn't itself change file permissions).
+NanCy actively blocks any `write`, `edit`, or `apply_patch` tool call whose target path resolves to `AGENTS.md`, `IDENTITY.md`, `MEMORY.md`, `NANCY-POLICY.md`, NanCy's own `src/` directory / `openclaw.plugin.json`, or anywhere under `tasks/` (now written exclusively by NanCy itself, see #2) — this block is unconditional and does not depend on the LLM analysis being configured or correct. Separately, at startup NanCy also audits whether the individual protected files are OS-writable and warns if they are (`chmod`-level protection is still recommended as defense in depth, since the audit only warns and doesn't itself change file permissions).
 
 ### 7. Main/Worker Session Split ✅ (optional)
 
@@ -73,6 +81,12 @@ When `mainSessionKey` is configured, that session is locked to passive reads —
 ### 8. Behavioral Review & Session Termination ✅
 
 Every 10 tool calls, NanCy runs a separate, session-level review over the recent call history — looking for *patterns* a single-call verdict can't see: loops, slow privilege escalation, repeated blocked attempts, a sustained attempt to bypass NanCy's own checks. This is additional to, not a replacement for, the per-call ALLOW/BLOCK/CLARIFY checks in feature #1. Only this behavioral review can terminate a session outright (`terminate` verdict) — once terminated, every subsequent tool call in that session is blocked unconditionally, regardless of what it is.
+
+### 9. Permanent Operator Policy ✅
+
+The confirmed task says what the user wants to accomplish; [`NANCY-POLICY.md`](./NANCY-POLICY.md) places standing limits on the means the worker may use. NanCy reads this file fresh into every tool-call, outbound-message, browser-context, and behavioral-review prompt. Its default rules cover access-control bypass, vulnerability exploitation, third-party rights, deception and retaliation, data minimization, consequential actions, untrusted external instructions, and attempts to evade supervision.
+
+The agent cannot write the policy file, and a short mandatory baseline is also compiled into NanCy's trusted code. The file may add operator-specific restrictions but cannot weaken that baseline. This matters when a harmful action would advance the literal task — for example, exploiting a booking API and removing another customer from a waitlist in order to secure the user's place.
 
 
 ## The Philosophy: Assume Compromise & Pragmatic Safety
@@ -107,7 +121,7 @@ See **["Security Philosophy: Limit the Blast Radius"](./SECURITY-PHILOSOPHY.md)*
 
 ## Where This Fits
 
-This isn't a novel idea — by September 2026 gating an agent's actions against a locked intent via a stateless external model is a recognized pattern (AI-control "trusted monitoring," intent-based guardrails), with close relatives in Meta LlamaFirewall's AlignmentCheck, ClawGuard, and Google ADK's plugin hooks. See **[RELATED-WORK.md](./RELATED-WORK.md)** for the detailed positioning, comparisons, and sources.
+This isn't a new security primitive — by September 2026 gating an agent's actions against explicit intent with an external reviewer and deterministic controls is a recognized pattern in AI control and agent authorization. Close relatives include Meta LlamaFirewall's AlignmentCheck, ClawGuard, CASA, IGAC, IntentGuard, NiyamAI, SARA, and OpenClaw's own security controls. To the best of our knowledge, however, no other publicly documented implementation combines code-owned user confirmation, fresh bounded review of both tool calls and outbound messages, deterministic policy boundaries, and disposable task workers in one OpenClaw plugin. See **[RELATED-WORK.md](./RELATED-WORK.md)** for the detailed positioning, comparisons, sources, and limits of that claim.
 
 ## Common Misconceptions
 
@@ -129,6 +143,8 @@ Short answers to the obvious objections — agent/reviewer collusion, whether th
 ```bash
 git clone https://github.com/fxg55647/NanCy.git C:/projects/nancy
 ```
+
+Review [`NANCY-POLICY.md`](./NANCY-POLICY.md) before enabling the plugin. Its shipped rules form the standing policy for every task; add deployment-specific restrictions there. NanCy reads changes fresh for each judgment, so an operator edit does not require a gateway restart. The file can tighten the built-in baseline but cannot relax it.
 
 ### 2. Register the plugin in openclaw.json
 

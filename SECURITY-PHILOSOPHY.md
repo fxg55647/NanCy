@@ -10,6 +10,18 @@ The goal is not to guarantee that an agent will never make a mistake. No probabi
 
 This means treating the agent's available permissions, money, data, credentials, communication channels, and ability to modify external systems as part of the security design.
 
+## Bounded delegation in practice
+
+Consider a task such as: "Find three Finnish printing companies, ask them for quotes for 500 brochures, and send the quotes to me."
+
+The user cannot know every website, form field, recipient, or tool call in advance. Requiring approval for each step would remove much of the value of autonomy, while a static allowlist broad enough to cover every possible route would say little about whether a particular action belongs to the task.
+
+NanCy's intended operating model is to let the user confirm the task once, then let a disposable worker choose the execution path while NanCy checks its actions against that confirmed task. The same boundary covers tool calls and outbound messages. It should allow legitimate steps such as visiting candidate printers and sending quote requests, while rejecting attempts to add an unrelated recipient, attach an unnecessary customer database, make an unrequested payment, or follow a web page's instruction into an unrelated task.
+
+This is bounded delegation: the worker may decide how to carry out the task, but the confirmation does not grant it general authority beyond that task. The semantic reviewer is probabilistic, so deterministic permissions, limited credentials, financial caps, and other blast-radius controls remain necessary.
+
+The confirmed task defines the authorized goal. NanCy's standing [`NANCY-POLICY.md`](./NANCY-POLICY.md) defines means that remain forbidden or require clarification across every task. Keeping these separate prevents a useful goal from being interpreted as permission to exploit a vulnerability, bypass access controls, harm a third party, disclose unnecessary data, or evade supervision in order to succeed.
+
 ## Limit the blast radius
 
 Before giving an agent a capability, ask:
