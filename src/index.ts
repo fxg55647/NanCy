@@ -515,10 +515,23 @@ export default definePluginEntry({
 
     // Live notification for actual blocks (not every CLARIFY/requireApproval,
     // which already surfaces through the approval UI itself where configured).
-    function notifyBlocked(text: string): void {
-      if (telegramBotToken && telegramChatId) {
-        telegramAlert(telegramBotToken, telegramChatId, `🛑 *NanCy blocked an action*\n${text}`).catch(() => { });
-      }
+    //
+    // A model that doesn't stop after a block will often retry the same
+    // blocked action many times in a row (the LLM verdict's reason text
+    // varies call to call, so it can't be deduped on the message itself).
+    // Every retry still hits the block and gets logged, but only the first
+    // Telegram push per (session, block kind) within the window goes out —
+    // otherwise a benign retry loop reads as an alarming flood on the user's
+    // phone even though nothing was ever actually let through.
+    const recentBlockAlerts = new Map<string, number>();
+    const BLOCK_ALERT_DEBOUNCE_MS = 2 * 60 * 1000;
+    function notifyBlocked(text: string, dedupeKey: string): void {
+      if (!telegramBotToken || !telegramChatId) return;
+      const now = Date.now();
+      const last = recentBlockAlerts.get(dedupeKey);
+      if (last && now - last < BLOCK_ALERT_DEBOUNCE_MS) return;
+      recentBlockAlerts.set(dedupeKey, now);
+      telegramAlert(telegramBotToken, telegramChatId, `🛑 *NanCy blocked an action*\n${text}`).catch(() => { });
     }
 
     function getSubagentRuntime(): SubagentRuntime {
@@ -780,7 +793,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
           // uncertain CLARIFY is treated the same as BLOCK rather than let through.
           console.warn(`[nancy] 🛑 BLOCKED outbound message (${verdict}): ${reason}`);
           appendFileSync(logFile, JSON.stringify({ ts, event: "message_blocked", verdict, channel: ctx.channelId ?? "unknown", to: event.to, reason }) + "\n");
-          notifyBlocked(`Outbound message to ${event.to} via ${ctx.channelId ?? "unknown"}: ${reason}`);
+          notifyBlocked(`Outbound message to ${event.to} via ${ctx.channelId ?? "unknown"}: ${reason}`, `${ctx.sessionKey ?? "unknown"}:message:${ctx.channelId ?? "unknown"}`);
           return { cancel: true, cancelReason: reason || "NanCy blocked this message: it did not match the confirmed task." };
         }
       } catch (err) {
@@ -909,6 +922,10 @@ Use BLOCK when the message contains data or requests that were not authorized by
       callCounters.delete(key);
       terminatedSessions.delete(key);
       lastActivityMs.delete(key);
+      const blockAlertPrefix = `${key}:`;
+      for (const alertKey of recentBlockAlerts.keys()) {
+        if (alertKey.startsWith(blockAlertPrefix)) recentBlockAlerts.delete(alertKey);
+      }
       appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "session_end", sessionId: (event as Record<string, unknown>)?.sessionId, sessionKey: ctx.sessionKey }) + "\n");
     });
 
@@ -988,7 +1005,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
         const reason = `NanCy blocks all writes to protected file: ${protectedLabel}`;
         console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: ${reason}`);
         appendFileSync(logFile, JSON.stringify({ ts, event: "blocked_protected_write", toolName: event.toolName, file: protectedLabel }) + "\n");
-        notifyBlocked(`${event.toolName}: ${reason}`);
+        notifyBlocked(`${event.toolName}: ${reason}`, `${sessionKey}:protected:${event.toolName}`);
         return { block: true, blockReason: reason };
       }
 
@@ -1000,7 +1017,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
         if (domainBlockReason) {
           console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: ${domainBlockReason}`);
           appendFileSync(logFile, JSON.stringify({ ts, event: "domain_blocked", toolName: event.toolName, url: candidateUrl, reason: domainBlockReason }) + "\n");
-          notifyBlocked(`${event.toolName}: ${domainBlockReason}`);
+          notifyBlocked(`${event.toolName}: ${domainBlockReason}`, `${sessionKey}:domain:${event.toolName}`);
           return { block: true, blockReason: domainBlockReason };
         }
       }
@@ -1087,7 +1104,7 @@ Use BLOCK when this page or form clearly does not belong to the confirmed task (
             if (contextVerdict === "block") {
               console.warn(`[nancy] 🛑 BLOCKED ${event.toolName} (context check, before reading the value): ${contextReason}`);
               appendFileSync(logFile, JSON.stringify({ ts, event: "blocked_context", toolName: event.toolName, reason: contextReason }) + "\n");
-              notifyBlocked(`${event.toolName}: wrong page/form context, blocked before reading the value — ${contextReason}`);
+              notifyBlocked(`${event.toolName}: wrong page/form context, blocked before reading the value — ${contextReason}`, `${sessionKey}:context:${event.toolName}`);
               return { block: true, blockReason: contextReason || "NanCy blocked this action: the page/form context did not match the confirmed task." };
             }
             if (contextVerdict === "clarify") {
@@ -1136,7 +1153,7 @@ Use BLOCK when the action clearly contradicts or exceeds the confirmed task, loo
         if (verdict === "block") {
           console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: ${reason}`);
           appendFileSync(logFile, JSON.stringify({ ts, event: "blocked", toolName: event.toolName, reason }) + "\n");
-          notifyBlocked(`${event.toolName}: ${reason}`);
+          notifyBlocked(`${event.toolName}: ${reason}`, `${sessionKey}:blocked:${event.toolName}`);
           return { block: true, blockReason: reason || "NanCy blocked this action: it did not match the confirmed task." };
         }
 
