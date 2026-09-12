@@ -85,6 +85,10 @@
       "workerAgentId": {
         "type": "string",
         "description": "Agent id used to spawn an isolated worker session for each confirmed task (session key: agent:<workerAgentId>:task-<id>). The worker session is deleted once the task completes. If unset, NanCy still records confirmations but does not spawn workers automatically."
+      },
+      "telegramAlerts": {
+        "type": "boolean",
+        "description": "Live Telegram push for blocked actions, session termination, and the startup status message. Everything is always fully written to nancy.log/nancy-analysis.log regardless of this setting — it only controls the live phone notification. Default true."
       }
     }
   }

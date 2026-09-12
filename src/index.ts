@@ -86,6 +86,11 @@ interface NancyConfig {
   mainSessionIdleMinutes?: number;
   // Agent id used to spawn an isolated worker session per confirmed task.
   workerAgentId?: string;
+  // Live Telegram push for blocked actions, session termination, and the
+  // startup status message. Everything is always fully written to nancy.log
+  // / nancy-analysis.log regardless of this setting — it only controls the
+  // live phone notification. Default true.
+  telegramAlerts?: boolean;
 }
 
 // Minimal shape of the subagent runtime NanCy needs to spawn and clean up
@@ -512,6 +517,10 @@ export default definePluginEntry({
     if (telegram?.botToken && !telegramBotToken) {
       console.warn("[nancy] ⚠️  telegram.botToken is a secret reference NanCy could not resolve (only source:\"env\" refs are supported) — Telegram alerts disabled");
     }
+    // Everything (blocks, termination, boot status) is always fully written
+    // to nancy.log/nancy-analysis.log regardless of this — it only gates the
+    // live phone push. Explicit opt-out: telegramAlerts: false.
+    const telegramAlertsEnabled = nancyConfig.telegramAlerts !== false && !!telegramBotToken && !!telegramChatId;
 
     // Live notification for every block, including CLARIFY (which also fails
     // closed — see before_tool_call below for why it doesn't pause for
@@ -527,12 +536,12 @@ export default definePluginEntry({
     const recentBlockAlerts = new Map<string, number>();
     const BLOCK_ALERT_DEBOUNCE_MS = 2 * 60 * 1000;
     function notifyBlocked(text: string, dedupeKey: string): void {
-      if (!telegramBotToken || !telegramChatId) return;
+      if (!telegramAlertsEnabled) return;
       const now = Date.now();
       const last = recentBlockAlerts.get(dedupeKey);
       if (last && now - last < BLOCK_ALERT_DEBOUNCE_MS) return;
       recentBlockAlerts.set(dedupeKey, now);
-      telegramAlert(telegramBotToken, telegramChatId, `🛑 *NanCy blocked an action*\n${text}`).catch(() => { });
+      telegramAlert(telegramBotToken!, telegramChatId!, `🛑 *NanCy blocked an action*\n${text}`).catch(() => { });
     }
 
     function getSubagentRuntime(): SubagentRuntime {
@@ -631,8 +640,8 @@ Reply ONLY with valid JSON — no other text:
 
         if (parsed.verdict === "suspicious") {
           console.warn(`[nancy] ⚠️  macro-review flagged session ${sessionKey} as suspicious: ${parsed.reason}`);
-          if (telegramBotToken && telegramChatId) {
-            telegramAlert(telegramBotToken, telegramChatId, `⚠️ *NanCy: suspicious pattern detected*\nSession: \`${sessionKey}\`\nReason: ${parsed.reason}`).catch(() => { });
+          if (telegramAlertsEnabled) {
+            telegramAlert(telegramBotToken!, telegramChatId!, `⚠️ *NanCy: suspicious pattern detected*\nSession: \`${sessionKey}\`\nReason: ${parsed.reason}`).catch(() => { });
           }
         }
 
@@ -640,8 +649,8 @@ Reply ONLY with valid JSON — no other text:
           terminatedSessions.set(sessionKey, true);
           console.warn(`[nancy] ⛔ macro-review TERMINATED session ${sessionKey}: ${parsed.reason}`);
           appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "session_terminated", sessionKey, reason: parsed.reason }) + "\n");
-          if (telegramBotToken && telegramChatId) {
-            telegramAlert(telegramBotToken, telegramChatId, `⛔ *NanCy: session TERMINATED*\nSession: \`${sessionKey}\`\nReason: ${parsed.reason}`).catch(() => { });
+          if (telegramAlertsEnabled) {
+            telegramAlert(telegramBotToken!, telegramChatId!, `⛔ *NanCy: session TERMINATED*\nSession: \`${sessionKey}\`\nReason: ${parsed.reason}`).catch(() => { });
           }
         }
       } catch { }
@@ -677,7 +686,7 @@ Reply ONLY with valid JSON — no other text:
         console.warn("[nancy] ⚠️  mainSessionKey not set — the main/worker session split is disabled; every session is treated the same way");
       }
 
-      if (telegramBotToken && telegramChatId) {
+      if (telegramAlertsEnabled) {
         const statusLine = writable.length > 0
           ? `⚠️ *SECURITY WARNING*: unprotected files: ${writable.map(f => f.label).join(", ")}`
           : `✅ Protected files are read-only`;
@@ -685,7 +694,7 @@ Reply ONLY with valid JSON — no other text:
           ? `✅ Analysis: ${nancyConfig.analysis.provider}/${nancyConfig.analysis.model}`
           : `⚠️ Analysis: not configured`;
         const splitStatus = nancyConfig.mainSessionKey ? `✅ Main/worker split: enabled` : `⚠️ Main/worker split: disabled`;
-        telegramAlert(telegramBotToken, telegramChatId, `🛡 *NanCy online*\n${statusLine}\n${analysisStatus}\n${splitStatus}`).catch(() => { });
+        telegramAlert(telegramBotToken!, telegramChatId!, `🛡 *NanCy online*\n${statusLine}\n${analysisStatus}\n${splitStatus}`).catch(() => { });
       }
 
       // Idle reset: periodically check the main session's last activity and
