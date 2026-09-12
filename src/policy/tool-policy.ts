@@ -46,6 +46,19 @@ function isSafeExecCommand(cmd: string): boolean {
 // processes, output so far); everything else (write/send-keys/paste/
 // submit/kill/clear/remove) drives or tears down a live process.
 const SAFE_PROCESS_ACTIONS = new Set(["list", "poll", "log"]);
+const SAFE_COMPUTER_ACTIONS = new Set(["screenshot", "wait"]);
+
+// Worker sessions may have tools supplied by extensions that NanCy has never
+// seen before. Treating an unknown name as safe creates an automatic bypass:
+// a new mail, cloud, or publishing tool would execute without any semantic
+// review until NanCy's source was updated. Only this deliberately small set
+// of passive local/metadata reads skips the reviewer; unknown tools default
+// to analysis.
+const PASSIVE_TOOLS = new Set([
+  "read", "ls", "view_image", "get_goal", "session_status",
+  "sessions_list", "sessions_history", "sessions_search", "agents_list",
+  "conversations_list", "github_identity_status", "transcripts",
+]);
 
 // The browser tool's actual dispatch field is `action` (top-level), with
 // interactive act-kinds nested under a separate `kind` field only when
@@ -86,6 +99,10 @@ function shouldAnalyzeBrowser(params: unknown): boolean {
 
 export function shouldAnalyze(toolName: string, params: unknown): boolean {
   if (toolName === "browser") return shouldAnalyzeBrowser(params);
+  if (toolName === "computer") {
+    const action = String((params as Record<string, unknown>)?.action ?? "");
+    return !SAFE_COMPUTER_ACTIONS.has(action);
+  }
   if (toolName === "exec") {
     const cmd = String((params as Record<string, unknown>)?.command ?? "");
     return !isSafeExecCommand(cmd);
@@ -94,7 +111,8 @@ export function shouldAnalyze(toolName: string, params: unknown): boolean {
     const action = String((params as Record<string, unknown>)?.action ?? "");
     return !SAFE_PROCESS_ACTIONS.has(action);
   }
-  return ALWAYS_ANALYZE.has(toolName);
+  if (ALWAYS_ANALYZE.has(toolName)) return true;
+  return !PASSIVE_TOOLS.has(toolName);
 }
 
 // Main/cron hard gate: default-deny. The main (chat) session and any
