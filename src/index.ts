@@ -737,6 +737,24 @@ Reply ONLY with valid JSON — no other text:
       appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "session_start", sessionId: event.sessionId, sessionKey: ctx.sessionKey }) + "\n");
     });
 
+    // Cron-trigger capture point: llm_input fires once per CLI run, before
+    // runCliRecovery/executeCliAttempt dispatches any tool calls for that
+    // run — verified against the running openclaw@2026.9.4 install's own
+    // compiled cli-runner (runAgentHarnessLlmInputHook is awaited-free but
+    // called, then immediately followed by runCliRecovery/executeCliAttempt,
+    // which is what actually issues before_tool_call via the native hook
+    // relay). llm_output, by contrast, fires only once at the very end of
+    // the whole attempt — empirically confirmed from nancy.log itself: every
+    // session in it shows a run of before_tool_call entries first and
+    // exactly one llm_output last. Capturing only on llm_output (the
+    // original version of this gate) left a session's entire first attempt
+    // — every tool call in it — completely ungated, because
+    // sessionTriggerByKey had no entry yet when before_tool_call ran.
+    api.on("llm_input", (event, ctx) => {
+      if (ctx.sessionKey && ctx.trigger) sessionTriggerByKey.set(ctx.sessionKey, ctx.trigger);
+      appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "llm_input", sessionKey: ctx.sessionKey, trigger: ctx.trigger, provider: event.provider, model: event.model }) + "\n");
+    });
+
     api.on("llm_output", (event, ctx) => {
       if (ctx.sessionKey && ctx.trigger) sessionTriggerByKey.set(ctx.sessionKey, ctx.trigger);
       appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "llm_output", sessionKey: ctx.sessionKey, trigger: ctx.trigger, provider: event.provider, model: event.model, texts: event.assistantTexts }) + "\n");
