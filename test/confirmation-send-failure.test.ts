@@ -46,8 +46,15 @@ test("confirmation: a successful delivery can still be confirmed normally", asyn
     handlers.message_sent({ success: true, content, messageId: "m-1", to: "user" }, { sessionKey: "sess-ok" });
     handlers.message_received({ content: "y" }, { sessionKey: "sess-ok" });
 
-    const currentTaskPath = join(rootDir, "workspace", "main", "tasks", "current.json");
-    assert.equal(existsSync(currentTaskPath), true, "a genuinely delivered confirmation must still work");
+    // tasks/current.json is no longer written at all — authorization now
+    // lives only in the in-memory per-worker-session map (see
+    // taskBySessionKey in src/index.ts), not in a shared file. The audit
+    // record for this specific task id is still written on disk, and the
+    // grant is still logged.
+    const auditRecordPath = join(rootDir, "workspace", "main", "tasks", "444444.json");
+    assert.equal(existsSync(auditRecordPath), true, "a genuinely delivered confirmation must still write its audit record");
+    const log = readFileSync(join(rootDir, "nancy.log"), "utf8");
+    assert.ok(log.includes('"confirmation_granted"') && log.includes('"id":"444444"'), "a genuinely delivered confirmation must still be granted");
   } finally {
     cleanup();
   }

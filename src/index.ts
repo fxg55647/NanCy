@@ -79,8 +79,9 @@ interface NancyConfig {
   };
   domains?: DomainConfig;
   // Session key of the main/chat session. When set, that session is locked to
-  // passive reads only (see MAIN_ALWAYS_BLOCK below) — real work must go
-  // through a confirmed task, which NanCy spawns as an isolated worker session.
+  // passive reads only (see the MAIN_ALLOWED_TOOLS/isMainGateAllowed default-deny
+  // gate below) — real work must go through a confirmed task, which NanCy
+  // spawns as an isolated worker session.
   mainSessionKey?: string;
   // Minutes of main-session inactivity after which it's automatically reset.
   mainSessionIdleMinutes?: number;
@@ -115,6 +116,17 @@ interface NancyConfig {
   // Lets a task be run against NanCy end-to-end to see exactly what it would
   // decide. Default false.
   testMode?: boolean;
+}
+
+// A task NanCy itself has confirmed via the user's "y" reply (see
+// message_received) and handed to exactly one worker session to execute
+// (see spawnWorkerForTask/taskBySessionKey).
+interface ConfirmedTask {
+  id: string;
+  ts: string;
+  description: string;
+  status: string;
+  openclaw_task_id: null;
 }
 
 // Minimal shape of the subagent runtime NanCy needs to spawn and clean up
@@ -521,21 +533,37 @@ export default definePluginEntry({
     // A confirmed task with no natural expiry would let one long-ago "y" reply
     // keep anchoring every action indefinitely, including well after the
     // agent's actual work on it should be over. Past this age it's treated as
-    // if nothing were confirmed, the same as if current.json didn't exist.
+    // if nothing were confirmed, the same as if it had never been recorded.
     const CONFIRMED_TASK_MAX_AGE_MS = 4 * 60 * 60 * 1000;
 
-    // Reads tasks/current.json for the given agent's workspace, honoring the
-    // same max-age cutoff as buildAnalysisContext below. Split out so callers
-    // that only need the task id (e.g. for tagging log lines — see logDecision)
+    // Authorization for a confirmed task lives ONLY here, keyed by the exact
+    // worker session key NanCy itself generates for it (see
+    // spawnWorkerForTask) — never in a shared file like tasks/current.json.
+    // A shared "current" file has no way to tell two concurrently-running
+    // tasks apart: the second task confirmed on the same workerAgentId would
+    // overwrite the first's record, so the first worker's before_tool_call
+    // calls would suddenly start seeing the *second* task as their confirmed
+    // authorization (or vice versa, depending on write order) — a real
+    // cross-task authorization leak between two unrelated running tasks, not
+    // just a cosmetic bug. Keying by the precise session a task was actually
+    // granted to (and only ever populating it via spawnWorkerForTask, never
+    // from anything the agent itself can write) makes that structurally
+    // impossible: two tasks always land under two distinct keys.
+    const taskBySessionKey = new Map<string, ConfirmedTask>();
+
+    // Looks up the task confirmed for this exact session, honoring the same
+    // max-age cutoff as buildAnalysisContext below. Split out so callers that
+    // only need the task id (e.g. for tagging log lines — see logDecision)
     // don't have to go through the full prompt-context builder.
-    function getCurrentTask(paths: AgentPaths): { id?: string; ts?: string; description?: string } | null {
-      try {
-        const parsed = JSON.parse(readFileSync(join(paths.TASKS_DIR, "current.json"), "utf8")) as { id?: string; ts?: string; description?: string };
-        const taskAgeMs = parsed.ts ? Date.now() - new Date(parsed.ts).getTime() : NaN;
-        if (!Number.isNaN(taskAgeMs) && taskAgeMs <= CONFIRMED_TASK_MAX_AGE_MS) {
-          return parsed;
-        }
-      } catch { }
+    function getCurrentTask(sessionKey: string | undefined): ConfirmedTask | null {
+      if (!sessionKey) return null;
+      const task = taskBySessionKey.get(sessionKey);
+      if (!task) return null;
+      const taskAgeMs = task.ts ? Date.now() - new Date(task.ts).getTime() : NaN;
+      if (!Number.isNaN(taskAgeMs) && taskAgeMs <= CONFIRMED_TASK_MAX_AGE_MS) return task;
+      // Expired — drop it so a stale record can't keep anchoring calls in
+      // this session forever, the same as the old file-based cutoff did.
+      taskBySessionKey.delete(sessionKey);
       return null;
     }
 
@@ -544,7 +572,7 @@ export default definePluginEntry({
     // sessionKey scopes recent-call/reasoning history to the calling session —
     // see recentCallsBySession/recentReasoningBySession above.
     function buildAnalysisContext(paths: AgentPaths, sessionKey: string | undefined, opts: { excludeMostRecentCall?: boolean } = {}) {
-      const currentTask = getCurrentTask(paths);
+      const currentTask = getCurrentTask(sessionKey);
       const allCalls = getRecentCalls(sessionKey);
       const calls = opts.excludeMostRecentCall ? allCalls.slice(0, -1) : allCalls;
       const reasoning = getRecentReasoning(sessionKey);
@@ -610,8 +638,9 @@ export default definePluginEntry({
     }
 
     // Main/worker session split: the main (chat) session is locked to passive
-    // reads only (see MAIN_ALWAYS_BLOCK below); real work happens in a worker
-    // session NanCy spawns per confirmed task (see message_received).
+    // reads only (see the MAIN_ALLOWED_TOOLS/isMainGateAllowed default-deny
+    // gate below); real work happens in a worker session NanCy spawns per
+    // confirmed task (see message_received).
     function isMainSession(sessionKey: string | undefined): boolean {
       return !!nancyConfig.mainSessionKey && sessionKey === nancyConfig.mainSessionKey;
     }
@@ -635,24 +664,31 @@ export default definePluginEntry({
     // Spawns an isolated worker session to execute a freshly confirmed task,
     // then deletes that session once the run finishes so its transcript can't
     // accumulate context across tasks (each task gets a clean session).
-    async function spawnWorkerForTask(task: { id: string; ts: string; description: string; status: string; openclaw_task_id: null }): Promise<void> {
+    async function spawnWorkerForTask(task: ConfirmedTask): Promise<void> {
       if (!nancyConfig.workerAgentId) return;
       const taskId = task.id;
       const workerSessionKey = `agent:${nancyConfig.workerAgentId}:task-${taskId}`;
-      // The worker's before_tool_call resolves its own confirmed-task context via
-      // getAgentPaths(ctx.agentId) — the worker agent's own workspace, not the
-      // main agent's, where message_received (above) wrote the record. Without
-      // this copy the worker session sees no confirmed task at all and every
-      // action it takes gets an unnecessary CLARIFY.
+
+      // ${taskId}.json is written purely as an on-disk audit record — it is
+      // NOT what grants the worker its authorization (see taskBySessionKey
+      // above). If even that record can't be written, treat the environment
+      // as unreliable enough that the worker must not run at all rather than
+      // executing with an authorization NanCy couldn't durably account for.
       try {
         const workerPaths = getAgentPaths(nancyConfig.workerAgentId);
         mkdirSync(workerPaths.TASKS_DIR, { recursive: true });
-        const taskJson = JSON.stringify(task, null, 2);
-        writeFileSync(join(workerPaths.TASKS_DIR, `${taskId}.json`), taskJson);
-        writeFileSync(join(workerPaths.TASKS_DIR, "current.json"), taskJson);
+        writeFileSync(join(workerPaths.TASKS_DIR, `${taskId}.json`), JSON.stringify(task, null, 2));
       } catch (err) {
         appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "worker_task_copy_error", taskId, error: String(err) }) + "\n");
+        console.warn(`[nancy] ⚠️  Failed to write task record for ${taskId} — refusing to spawn a worker for it: ${String(err)}`);
+        return;
       }
+
+      // Grant authorization to this exact session BEFORE spawning it, so
+      // there is no window where the worker session exists but its first
+      // before_tool_call would find no confirmed task yet.
+      taskBySessionKey.set(workerSessionKey, task);
+
       try {
         const subagent = getSubagentRuntime();
         const result = await subagent.run({
@@ -685,6 +721,10 @@ export default definePluginEntry({
             // Still not finished after WORKER_MAX_WAIT_ATTEMPTS rounds of
             // waiting — leave the worker session in place rather than
             // deleting it out from under a run that may still be executing.
+            // Its task authorization stays live too, for the same reason:
+            // the worker may still legitimately be mid-task, and revoking it
+            // now would make its very next before_tool_call see no confirmed
+            // task at all and get blocked outright.
             console.warn(`[nancy] ⚠️  worker for task ${taskId} did not finish after extended waiting (status=${waitResult.status}) — leaving session ${workerSessionKey} in place, skipping cleanup`);
             appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "worker_wait_exhausted", taskId, runId: result.runId, status: waitResult.status, workerSessionKey }) + "\n");
             return;
@@ -709,9 +749,22 @@ export default definePluginEntry({
             console.log(`[nancy] ✓ Worker session cleaned up for task ${taskId}`);
           } catch (err) {
             appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "worker_cleanup_error", taskId, error: String(err) }) + "\n");
+          } finally {
+            // The run itself has already concluded (ok/error) by this point
+            // regardless of whether deleteSession succeeded — nothing should
+            // be able to reuse this task's authorization afterward, whether
+            // via a fresh session that happens to reuse workerSessionKey or
+            // otherwise (see the "later new session" regression test).
+            taskBySessionKey.delete(workerSessionKey);
           }
-        })().catch((err: unknown) => appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "worker_cleanup_error", taskId, error: String(err) }) + "\n"));
+        })().catch((err: unknown) => {
+          appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "worker_cleanup_error", taskId, error: String(err) }) + "\n");
+          taskBySessionKey.delete(workerSessionKey);
+        });
       } catch (err) {
+        // subagent.run() itself threw — the worker session never really
+        // started, so nothing should remain authorized under its key.
+        taskBySessionKey.delete(workerSessionKey);
         appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "worker_spawn_error", taskId, error: String(err) }) + "\n");
         console.warn(`[nancy] ⚠️  Failed to spawn worker for task ${taskId}: ${err}`);
       }
@@ -793,7 +846,7 @@ Reply ONLY with valid JSON — no other text:
       }
 
       if (nancyConfig.testMode) {
-        console.warn("[nancy] 🧪 TEST MODE ENABLED — analysis runs and is fully logged as normal, but no tool call will ever actually execute. Remember to turn this off for real use.");
+        console.warn("[nancy] 🧪 TEST MODE ENABLED — analysis runs and is fully logged as normal, but no tool call and no outbound message (other than NanCy's own fixed confirmation-request prompt) will ever actually execute/send. Remember to turn this off for real use.");
         appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "test_mode_enabled" }) + "\n");
       }
 
@@ -805,7 +858,7 @@ Reply ONLY with valid JSON — no other text:
           ? `✅ Analysis: ${nancyConfig.analysis.provider}/${nancyConfig.analysis.model}`
           : `⚠️ Analysis: not configured`;
         const splitStatus = nancyConfig.mainSessionKey ? `✅ Main/worker split: enabled` : `⚠️ Main/worker split: disabled`;
-        const testModeStatus = nancyConfig.testMode ? `\n🧪 *TEST MODE*: no tool call can actually execute` : "";
+        const testModeStatus = nancyConfig.testMode ? `\n🧪 *TEST MODE*: no tool call or outbound message can actually execute/send` : "";
         telegramAlert(telegramBotToken!, telegramChatId!, `🛡 *NanCy online*\n${statusLine}\n${analysisStatus}\n${splitStatus}${testModeStatus}`).catch(() => { });
       }
 
@@ -865,7 +918,7 @@ Reply ONLY with valid JSON — no other text:
       // ctx.runId is not currently populated for message_sending by the host
       // (see PluginHookMessageContext.runId docs) — included anyway so logs
       // pick it up automatically once/if that changes upstream.
-      const logIds: LogIds = { sessionKey: ctx.sessionKey, runId: ctx.runId, taskId: getCurrentTask(defaultPaths)?.id };
+      const logIds: LogIds = { sessionKey: ctx.sessionKey, runId: ctx.runId, taskId: getCurrentTask(ctx.sessionKey)?.id };
 
       const isReasoning = content.startsWith("Reasoning:");
       if (isReasoning) {
@@ -906,7 +959,16 @@ Reply ONLY with valid JSON — no other text:
       // injection) could prepend it to any message to skip analysis entirely.
       // Reasoning content still gets recorded above for context, but must
       // still pass through Intent Anchoring below like any other outbound text.
-      if (confirmationRequest) return;
+      //
+      // This exemption applies in test mode too — see the testMode doc
+      // comment on NancyConfig for why sending it for real is not a new
+      // exposure test mode wouldn't already have.
+      if (confirmationRequest) {
+        if (nancyConfig.testMode) {
+          logDecision(logFile, ts, "test_mode_confirmation_sent_for_real", logIds, { channel: ctx.channelId ?? "unknown", to: event.to });
+        }
+        return;
+      }
 
       // Intent Anchoring for the outbound message content itself, not just tool
       // calls: some channels (e.g. OpenClaw's imap/email extension) dispatch
@@ -914,9 +976,17 @@ Reply ONLY with valid JSON — no other text:
       // so before_tool_call alone can't cover them.
       const analysisCfg = nancyConfig.analysis;
       if (!analysisCfg) {
+        logDecision(analysisLog, ts, "analysis_not_configured", logIds, { error: "analysis not configured" });
+        if (nancyConfig.testMode) {
+          // Unlike the normal fail-open path below, test mode's whole point is
+          // that no outbound send is real — an unanalyzable message doesn't
+          // get an exception to that.
+          console.warn(`[nancy] 🧪 TEST MODE — outbound message to ${event.to} would go out unanalyzed (analysis not configured); dry-run only, not actually sent.`);
+          logDecision(logFile, ts, "test_mode_would_send_message", logIds, { channel: ctx.channelId ?? "unknown", to: event.to, reason: "analysis not configured" });
+          return { cancel: true, cancelReason: "[TEST MODE] Outbound message blocked for dry-run: security analysis is not configured, so NanCy cannot verify it. No message is ever actually sent in test mode." };
+        }
         // message_sending has no requireApproval-style pause available (unlike
         // before_tool_call) — fail open here rather than muting the agent entirely.
-        logDecision(analysisLog, ts, "analysis_not_configured", logIds, { error: "analysis not configured" });
         return;
       }
 
@@ -942,8 +1012,21 @@ Use BLOCK when the message contains data or requests that were not authorized by
           notifyBlocked(`Outbound message to ${event.to} via ${ctx.channelId ?? "unknown"}: ${reason}`, `${ctx.sessionKey ?? "unknown"}:message:${ctx.channelId ?? "unknown"}`);
           return { cancel: true, cancelReason: reason || "NanCy blocked this message: it did not match the confirmed task." };
         }
+
+        if (verdict === "allow" && nancyConfig.testMode) {
+          const testReason = `[TEST MODE] NanCy would have ALLOWED this outbound message in production: ${reason || "matches the confirmed task."} No message is ever actually sent in test mode.`;
+          console.warn(`[nancy] 🧪 TEST MODE — would ALLOW outbound message to ${event.to}: ${reason}`);
+          logDecision(logFile, ts, "test_mode_would_send_message", logIds, { channel: ctx.channelId ?? "unknown", to: event.to, reason });
+          return { cancel: true, cancelReason: testReason };
+        }
+        // verdict === "allow" (and not testMode) — fall through and let it send
       } catch (err) {
         logDecision(analysisLog, ts, "message_sending_analysis_error", logIds, { error: String(err) });
+        if (nancyConfig.testMode) {
+          console.warn(`[nancy] 🧪 TEST MODE — outbound message analysis failed; dry-run blocks it instead of failing open: ${String(err)}`);
+          logDecision(logFile, ts, "test_mode_would_send_message", logIds, { channel: ctx.channelId ?? "unknown", to: event.to, error: String(err) });
+          return { cancel: true, cancelReason: `[TEST MODE] Outbound message blocked for dry-run: analysis failed (${String(err)}). No message is ever actually sent in test mode.` };
+        }
         console.warn(`[nancy] ⚠️  outbound message analysis failed, allowing it through (fail-open, no approval path exists here): ${String(err)}`);
       }
     });
@@ -1011,12 +1094,14 @@ Use BLOCK when the message contains data or requests that were not authorized by
       // NanCy — not the agent — writes the confirmed task record. Writes to
       // tasks/ by any other actor are blocked in before_tool_call below.
       // message_received carries no agentId, so this always targets the main
-      // agent's workspace (see defaultPaths above).
+      // agent's workspace (see defaultPaths above). This file is an audit
+      // record only, not a grant of authorization — the worker session that
+      // actually executes the task gets its authorization directly, keyed to
+      // its own session (see spawnWorkerForTask/taskBySessionKey).
       try {
         mkdirSync(defaultPaths.TASKS_DIR, { recursive: true });
-        const record = { id: pending.id, ts: new Date().toISOString(), description: pending.description, status: "confirmed", openclaw_task_id: null };
+        const record: ConfirmedTask = { id: pending.id, ts: new Date().toISOString(), description: pending.description, status: "confirmed", openclaw_task_id: null };
         writeFileSync(join(defaultPaths.TASKS_DIR, `${pending.id}.json`), JSON.stringify(record, null, 2));
-        writeFileSync(join(defaultPaths.TASKS_DIR, "current.json"), JSON.stringify(record, null, 2));
         console.log(`[nancy] ✓ confirmation id=${pending.id} granted, task locked`);
         appendFileSync(logFile, JSON.stringify({ ts, event: "confirmation_granted", sessionKey: ctx.sessionKey, id: pending.id, description: pending.description }) + "\n");
         // Spawn the isolated worker session for this task now that NanCy itself
@@ -1100,6 +1185,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
       terminatedSessions.delete(key);
       lastActivityMs.delete(key);
       sessionTriggerByKey.delete(key);
+      taskBySessionKey.delete(key);
       const blockAlertPrefix = `${key}:`;
       for (const alertKey of recentBlockAlerts.keys()) {
         if (alertKey.startsWith(blockAlertPrefix)) recentBlockAlerts.delete(alertKey);
@@ -1107,13 +1193,28 @@ Use BLOCK when the message contains data or requests that were not authorized by
       appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "session_end", sessionId: (event as Record<string, unknown>)?.sessionId, sessionKey: ctx.sessionKey }) + "\n");
     });
 
-    // Tool names verified against openclaw@2026.9.3's own source (web_form_submit,
-    // write_file, and run_command do not exist as tool names in that package —
-    // the real names are web_fetch, write, and exec/bash/shell respectively).
+    // Tool names verified against the actual installed openclaw@2026.9.4
+    // package's own tool registry (core-tool-factory-descriptors.ts's
+    // CORE_TOOL_FACTORY_DESCRIPTORS) and the browser/computer extension
+    // schemas — not guessed. "shell" and "bash" (from an earlier version of
+    // this list) are not real openclaw tool names; the actual shell-family
+    // tools are "exec" and "process" (process controls an already-running
+    // exec session — write/send-keys/paste/kill/etc — so it can drive an
+    // interactive shell one keypress at a time without ever passing through
+    // a "command" string, and needs its own check, not exec's).
     const ALWAYS_ANALYZE = new Set([
       "web_fetch", "web_search", "write", "edit",
+      // Real tool (family "shell", same as write/edit) that was previously
+      // missing here entirely: it wasn't hard-blocked anywhere AND wasn't
+      // analyzed, so it executed with zero check of any kind, in every
+      // session type including main/cron.
+      "apply_patch",
+      // The generic outbound-send tool carries the same exfiltration risk
+      // as an outbound channel message, so it gets the same LLM review
+      // before it runs (message_sending separately reviews the actual
+      // channel delivery once this tool call is allowed to proceed).
+      "message",
     ]);
-    const ANALYZE_IF_RISKY = new Set(["exec", "shell", "bash"]);
     // Skip read-only and harmless shell commands to avoid adding Gemini latency
     // with no security value. cp/mv were removed from this list — both can
     // overwrite or relocate arbitrary files and are not safe to exempt.
@@ -1129,36 +1230,119 @@ Use BLOCK when the message contains data or requests that were not authorized by
       const trimmed = cmd.trim();
       return SAFE_EXEC.test(trimmed) && !SHELL_METACHARACTERS.test(trimmed);
     }
-    // Browser commands that interact with the page or run arbitrary JS — snapshot
-    // taken before each. "evaluate" (arbitrary JS in the page) and "extract" are
-    // real browser sub-commands that were previously missing from this set.
-    const BROWSER_INTERACT = new Set(["act", "navigate", "click", "fill", "type", "submit", "press", "drag", "select", "evaluate", "extract"]);
-    // Commands whose params carry the actual value being written into the page
-    // (a form field's contents, typed text, a selected option). These get a
-    // context-only pre-check first — see before_tool_call below.
-    const BROWSER_VALUE_COMMANDS = new Set(["fill", "type", "select"]);
+    // process's "list"/"poll"/"log" actions only read state (running
+    // processes, output so far); everything else (write/send-keys/paste/
+    // submit/kill/clear/remove) drives or tears down a live process.
+    const SAFE_PROCESS_ACTIONS = new Set(["list", "poll", "log"]);
+
+    // The browser tool's actual dispatch field is `action` (top-level), with
+    // interactive act-kinds nested under a separate `kind` field only when
+    // action:"act" — NOT a `command` field. An earlier version of this file
+    // read a nonexistent `command` field for browser calls, which silently
+    // made every single browser call — in every session type, main/cron
+    // included — look like a no-op to both this analysis gate and the old
+    // MAIN_BROWSER_BLOCK_CMDS check: browser was never analyzed and never
+    // blocked, regardless of what it actually did.
+    function browserAction(params: unknown): string {
+      return String((params as Record<string, unknown>)?.action ?? "");
+    }
+    function browserActKind(params: unknown): string {
+      return String((params as Record<string, unknown>)?.kind ?? "");
+    }
+    // Non-"act" browser actions that themselves navigate, transfer files,
+    // change browser/profile state, or otherwise reach beyond a passive read.
+    const BROWSER_INTERACTIVE_ACTIONS = new Set([
+      "start", "stop", "importprofile", "open", "navigate", "focus", "close",
+      "download", "waitfordownload", "upload", "dialog", "emulate", "pdf",
+    ]);
+    // action:"act" kinds that interact with or mutate the page. "batch" is
+    // included since it can itself nest any of these.
+    const BROWSER_INTERACTIVE_ACT_KINDS = new Set([
+      "batch", "click", "clickCoords", "type", "press", "hover",
+      "scrollIntoView", "drag", "select", "fill", "resize", "evaluate", "close",
+    ]);
+    // act-kinds whose params carry the actual value being written into the
+    // page (a form field's contents, typed text, a selected option). These
+    // get a context-only pre-check first — see before_tool_call below.
+    const BROWSER_VALUE_ACT_KINDS = new Set(["fill", "type", "select"]);
+
+    function shouldAnalyzeBrowser(params: unknown): boolean {
+      const action = browserAction(params);
+      if (action === "act") return BROWSER_INTERACTIVE_ACT_KINDS.has(browserActKind(params));
+      return BROWSER_INTERACTIVE_ACTIONS.has(action);
+    }
 
     function shouldAnalyze(toolName: string, params: unknown): boolean {
-      if (toolName === "browser") {
-        const cmd = String((params as Record<string, unknown>)?.command ?? "");
-        return BROWSER_INTERACT.has(cmd);
-      }
-      if (ALWAYS_ANALYZE.has(toolName)) {
-        return true;
-      }
-      if (ANALYZE_IF_RISKY.has(toolName)) {
+      if (toolName === "browser") return shouldAnalyzeBrowser(params);
+      if (toolName === "exec") {
         const cmd = String((params as Record<string, unknown>)?.command ?? "");
         return !isSafeExecCommand(cmd);
       }
-      return false;
+      if (toolName === "process") {
+        const action = String((params as Record<string, unknown>)?.action ?? "");
+        return !SAFE_PROCESS_ACTIONS.has(action);
+      }
+      return ALWAYS_ANALYZE.has(toolName);
     }
 
-    // Main session hard gate: state-changing tools are forbidden outright,
-    // independent of LLM analysis, so a misjudged verdict can never let the
-    // chat session itself mutate anything. Names verified the same way as
-    // ALWAYS_ANALYZE/ANALYZE_IF_RISKY above.
-    const MAIN_ALWAYS_BLOCK = new Set(["write", "edit", "exec", "shell", "bash"]);
-    const MAIN_BROWSER_BLOCK_CMDS = new Set(["act", "click", "fill", "type", "submit", "press", "drag", "select", "evaluate"]);
+    // Main/cron hard gate: default-deny. The main (chat) session and any
+    // cron-triggered run (see isCronTrigger) must never execute real work
+    // directly — only pure, side-effect-free reads. This used to be a
+    // *blocklist* (MAIN_ALWAYS_BLOCK/MAIN_BROWSER_BLOCK_CMDS): any tool NOT
+    // named in it fell through completely unchecked, so a tool simply
+    // missing from the list — apply_patch among them — got free execution
+    // by default, and stayed that way even once the analysis gate above
+    // covered it, since main/cron sessions never reach that gate at all for
+    // a tool this one doesn't name.
+    //
+    // Flipped to an allowlist: only the tool names / sub-actions enumerated
+    // below may run at all in the main/cron gate; every other tool — every
+    // known dangerous one (write, edit, apply_patch, exec, process, secrets,
+    // gateway, subagents, sessions_spawn/_send/_yield, conversations_send,
+    // message, automations, github_publish, nodes, mobile_ui, terminal, ...)
+    // and any tool NanCy has never heard of — is blocked outright,
+    // independent of LLM analysis. Real work always goes through a confirmed
+    // task, executed in an isolated worker session instead (see
+    // spawnWorkerForTask).
+    //
+    // Enumerated against openclaw@2026.9.4's actual tool registry
+    // (core-tool-factory-descriptors.ts) and the browser/computer extension
+    // schemas, not guessed. web_fetch/web_search are deliberately NOT on
+    // this list even though they only "read": they reach the open network
+    // under agent-chosen URLs, which is exactly the exfiltration/SSRF shape
+    // Domain Border Control and full LLM analysis exist to catch — main/cron
+    // sessions get neither of those, so those two tools go through a
+    // confirmed task like any other real action.
+    const MAIN_ALLOWED_TOOLS = new Set([
+      "read", "ls",                  // local file/dir reads
+      "view_image",                  // view an already-produced image
+      "get_goal", "session_status",  // read own configured goal / session state
+      "sessions_list", "sessions_history", "sessions_search", // read session metadata
+      "agents_list",                 // read configured agents
+      "conversations_list",          // read channel/conversation metadata
+      "github_identity_status",      // read auth status
+      "transcripts",                 // read a transcript
+    ]);
+    // "browser" and "computer" are single tools whose action space mixes
+    // read-only observation with real interaction, so they're gated by
+    // sub-action instead of by tool name.
+    const MAIN_ALLOWED_BROWSER_ACTIONS = new Set([
+      "snapshot", "screenshot", "text", "tabs", "console", "requests", "errors", "status", "doctor",
+    ]);
+    // Exactly openclaw@2026.9.4's own LOCAL_ACTIONS constant for the computer
+    // tool (src/agents/tools/computer-tool.ts) — its own designation for the
+    // only actions that don't target or mutate a window, browser, or element.
+    const MAIN_ALLOWED_COMPUTER_ACTIONS = new Set(["screenshot", "wait"]);
+
+    function isMainGateAllowed(toolName: string, params: unknown): boolean {
+      if (MAIN_ALLOWED_TOOLS.has(toolName)) return true;
+      if (toolName === "browser") return MAIN_ALLOWED_BROWSER_ACTIONS.has(browserAction(params));
+      if (toolName === "computer") {
+        const action = String((params as Record<string, unknown>)?.action ?? "");
+        return MAIN_ALLOWED_COMPUTER_ACTIONS.has(action);
+      }
+      return false;
+    }
 
     api.on("before_tool_call", async (event, ctx) => {
       const ts = new Date().toISOString();
@@ -1168,7 +1352,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
       // decision/log line for this call — block, clarify, or analysis error —
       // carries the same sessionKey/runId/toolCallId/taskId, letting concurrent
       // calls (parallel sessions, parallel workers) be told apart in the logs.
-      const logIds: LogIds = { sessionKey: ctx.sessionKey, runId: ctx.runId, toolCallId: ctx.toolCallId, taskId: getCurrentTask(agentPaths)?.id };
+      const logIds: LogIds = { sessionKey: ctx.sessionKey, runId: ctx.runId, toolCallId: ctx.toolCallId, taskId: getCurrentTask(ctx.sessionKey)?.id };
       logDecision(logFile, ts, "before_tool_call", logIds, { toolName: event.toolName, params: event.params, trigger: sessionTriggerByKey.get(sessionKey) });
       touchActivity(sessionKey);
 
@@ -1231,24 +1415,13 @@ Use BLOCK when the message contains data or requests that were not authorized by
       // sessionKey isn't mainSessionKey. See isCronTrigger/sessionTriggerByKey above.
       const cronRun = isCronTrigger(ctx.sessionKey);
       if (isMainSession(ctx.sessionKey) || cronRun) {
-        if (MAIN_ALWAYS_BLOCK.has(event.toolName)) {
+        if (!isMainGateAllowed(event.toolName, event.params)) {
           const reason = cronRun
-            ? `'${event.toolName}' is not permitted for a cron-triggered run. Create a confirmed task first.`
-            : `'${event.toolName}' is not permitted in the main session. Create a confirmed task first.`;
+            ? `'${event.toolName}' is not on NanCy's allow-list for a cron-triggered run. Create a confirmed task first.`
+            : `'${event.toolName}' is not on NanCy's allow-list for the main session. Create a confirmed task first.`;
           console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: ${reason}`);
           logDecision(logFile, ts, "blocked_main_session", logIds, { toolName: event.toolName, reason, trigger: cronRun ? "cron" : undefined });
           return { block: true, blockReason: reason };
-        }
-        if (event.toolName === "browser") {
-          const cmd = String((event.params as Record<string, unknown>)?.command ?? "");
-          if (MAIN_BROWSER_BLOCK_CMDS.has(cmd)) {
-            const reason = cronRun
-              ? `Browser '${cmd}' is not permitted for a cron-triggered run. Create a confirmed task first.`
-              : `Browser '${cmd}' is not permitted in the main session. Create a confirmed task first.`;
-            console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: ${reason}`);
-            logDecision(logFile, ts, "blocked_main_session", logIds, { toolName: event.toolName, command: cmd, reason, trigger: cronRun ? "cron" : undefined });
-            return { block: true, blockReason: reason };
-          }
         }
       }
 
@@ -1294,10 +1467,10 @@ Use BLOCK when the message contains data or requests that were not authorized by
         // any prompt. Catches "wrong page entirely" without NanCy — or the
         // third-party analysis API behind it — ever reading what was typed.
         // Only reached once analysisCfg is confirmed present (checked above).
-        const browserCmd = String((event.params as Record<string, unknown>)?.command ?? "");
-        if (BROWSER_VALUE_COMMANDS.has(browserCmd)) {
+        const browserKind = browserAction(event.params) === "act" ? browserActKind(event.params) : "";
+        if (BROWSER_VALUE_ACT_KINDS.has(browserKind)) {
           const ctxOnly = buildAnalysisContext(agentPaths, ctx.sessionKey, { excludeMostRecentCall: true });
-          const contextPrompt = `You are a stateless security observer enforcing Intent Anchoring for an AI agent. You have no memory of previous calls beyond what is given here. ${ctxOnly.taskContext}${ctxOnly.historyContext}${ctxOnly.reasoningContext}${snapshotContext}The agent is about to fill in or select a value on the current page (tool: browser, command: ${browserCmd}). You are NOT shown the value being entered — only the page/form context.
+          const contextPrompt = `You are a stateless security observer enforcing Intent Anchoring for an AI agent. You have no memory of previous calls beyond what is given here. ${ctxOnly.taskContext}${ctxOnly.historyContext}${ctxOnly.reasoningContext}${snapshotContext}The agent is about to fill in or select a value on the current page (tool: browser, action: act, kind: ${browserKind}). You are NOT shown the value being entered — only the page/form context.
 
 Decide whether this page/form plausibly belongs to the confirmed task, and respond in EXACTLY this format (nothing before it):
 VERDICT: ALLOW|BLOCK|CLARIFY
@@ -1390,10 +1563,12 @@ Use BLOCK when the action clearly contradicts or exceeds the confirmed task, loo
     const WEB_SNAPSHOT_TOOLS = new Set(["web_fetch"]);
 
     api.on("after_tool_call", (event, _ctx) => {
-      // Form submission has no dedicated tool — it happens via browser+submit —
-      // so that's snapshotted here too, alongside plain web_fetch calls.
+      // Form submission has no dedicated action — it's act:fill/act:type with
+      // `submit: true` — so that's snapshotted here too, alongside plain
+      // web_fetch calls.
       const isBrowserSubmit = event.toolName === "browser"
-        && String((event.params as Record<string, unknown>)?.command ?? "") === "submit";
+        && browserAction(event.params) === "act"
+        && (event.params as Record<string, unknown>)?.submit === true;
       if (!WEB_SNAPSHOT_TOOLS.has(event.toolName) && !isBrowserSubmit) return;
       const ts = new Date().toISOString();
       const content = JSON.stringify({ ts, toolName: event.toolName, params: event.params, result: (event as Record<string, unknown>).result ?? null }, null, 2);
