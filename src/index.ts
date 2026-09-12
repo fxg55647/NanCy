@@ -513,8 +513,9 @@ export default definePluginEntry({
       console.warn("[nancy] ⚠️  telegram.botToken is a secret reference NanCy could not resolve (only source:\"env\" refs are supported) — Telegram alerts disabled");
     }
 
-    // Live notification for actual blocks (not every CLARIFY/requireApproval,
-    // which already surfaces through the approval UI itself where configured).
+    // Live notification for every block, including CLARIFY (which also fails
+    // closed — see before_tool_call below for why it doesn't pause for
+    // approval).
     //
     // A model that doesn't stop after a block will often retry the same
     // blocked action many times in a row (the LLM verdict's reason text
@@ -1056,17 +1057,18 @@ Use BLOCK when the message contains data or requests that were not authorized by
 
       const analysisCfg = nancyConfig.analysis;
       if (!analysisCfg) {
+        // Fail-safe: without analysis NanCy cannot verify intent alignment.
+        // Blocks outright rather than pausing for a manual decision — native
+        // approval delivery isn't available on every channel (e.g. Telegram
+        // has no native plugin-approval surface), so a pause-for-approval
+        // here would hang or error instead of actually reaching a human. The
+        // agent explains the block to the user in its own next reply.
+        const reason = `${event.toolName}: security analysis is not configured, so NanCy cannot verify this action against the confirmed task.`;
         appendFileSync(analysisLog, JSON.stringify({ ts, toolName: event.toolName, error: "analysis not configured" }) + "\n");
-        // Fail-safe: without analysis NanCy cannot verify intent alignment, so
-        // sensitive actions require a manual decision instead of proceeding silently.
-        return {
-          requireApproval: {
-            title: "NanCy: analysis not configured",
-            description: `${event.toolName}: security analysis is not configured, so NanCy cannot verify this action against the confirmed task. Approve manually to continue.`,
-            severity: "warning",
-            allowedDecisions: ["allow-once", "allow-always", "deny"],
-          },
-        };
+        console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: analysis not configured`);
+        appendFileSync(logFile, JSON.stringify({ ts, event: "blocked_no_analysis", toolName: event.toolName }) + "\n");
+        notifyBlocked(reason, `${sessionKey}:no-analysis:${event.toolName}`);
+        return { block: true, blockReason: reason };
       }
 
       let snapshotContext = "";
@@ -1108,29 +1110,23 @@ Use BLOCK when this page or form clearly does not belong to the confirmed task (
               return { block: true, blockReason: contextReason || "NanCy blocked this action: the page/form context did not match the confirmed task." };
             }
             if (contextVerdict === "clarify") {
-              console.warn(`[nancy] ⚠️  CLARIFY ${event.toolName} (context check): ${contextReason}`);
-              appendFileSync(logFile, JSON.stringify({ ts, event: "clarify_required_context", toolName: event.toolName, reason: contextReason }) + "\n");
-              return {
-                requireApproval: {
-                  title: "NanCy: confirm this page/form",
-                  description: `${event.toolName}: ${contextReason || "This page/form does not clearly match the confirmed task."}`,
-                  severity: "warning",
-                  allowedDecisions: ["allow-once", "allow-always", "deny"],
-                },
-              };
+              // Blocks instead of pausing for approval — see the "analysis not
+              // configured" comment above for why. One upfront task
+              // confirmation is the only interactive step; anything uncertain
+              // after that fails closed and the agent explains why.
+              console.warn(`[nancy] 🛑 BLOCKED ${event.toolName} (context check, unclear): ${contextReason}`);
+              appendFileSync(logFile, JSON.stringify({ ts, event: "blocked_context_clarify", toolName: event.toolName, reason: contextReason }) + "\n");
+              notifyBlocked(`${event.toolName}: unclear page/form context — ${contextReason}`, `${sessionKey}:context:${event.toolName}`);
+              return { block: true, blockReason: contextReason || "NanCy blocked this action: the page/form context does not clearly match the confirmed task." };
             }
             // contextVerdict === "allow" — fall through to the full, value-included check below
           } catch (err) {
             appendFileSync(analysisLog, JSON.stringify({ ts, toolName: event.toolName, phase: "context", error: String(err) }) + "\n");
-            console.warn(`[nancy] ⚠️  context-only analysis failed for ${event.toolName}, requiring manual approval (fail-safe): ${String(err)}`);
-            return {
-              requireApproval: {
-                title: "NanCy: security analysis failed",
-                description: `Could not verify the page/form context for ${event.toolName} (${String(err)}). Approve manually to continue.`,
-                severity: "critical",
-                allowedDecisions: ["allow-once", "deny"],
-              },
-            };
+            const reason = `Could not verify the page/form context for ${event.toolName} (${String(err)}).`;
+            console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: context analysis failed, blocking as precaution: ${String(err)}`);
+            appendFileSync(logFile, JSON.stringify({ ts, event: "blocked_context_error", toolName: event.toolName, error: String(err) }) + "\n");
+            notifyBlocked(reason, `${sessionKey}:context-error:${event.toolName}`);
+            return { block: true, blockReason: reason };
           }
         }
       }
@@ -1158,29 +1154,23 @@ Use BLOCK when the action clearly contradicts or exceeds the confirmed task, loo
         }
 
         if (verdict === "clarify") {
-          console.warn(`[nancy] ⚠️  CLARIFY ${event.toolName}: ${reason}`);
-          appendFileSync(logFile, JSON.stringify({ ts, event: "clarify_required", toolName: event.toolName, reason }) + "\n");
-          return {
-            requireApproval: {
-              title: "NanCy: confirm this action",
-              description: `${event.toolName}: ${reason || "This action does not clearly match the confirmed task."}`,
-              severity: "warning",
-              allowedDecisions: ["allow-once", "allow-always", "deny"],
-            },
-          };
+          // Blocks instead of pausing for approval — see the "analysis not
+          // configured" comment above. Only the one upfront task confirmation
+          // is interactive; anything uncertain during execution fails closed
+          // and the agent explains the block to the user in its own words.
+          console.warn(`[nancy] 🛑 BLOCKED ${event.toolName} (unclear): ${reason}`);
+          appendFileSync(logFile, JSON.stringify({ ts, event: "blocked_clarify", toolName: event.toolName, reason }) + "\n");
+          notifyBlocked(`${event.toolName}: ${reason}`, `${sessionKey}:clarify:${event.toolName}`);
+          return { block: true, blockReason: reason || "NanCy blocked this action: it does not clearly match the confirmed task." };
         }
         // verdict === "allow" — fall through and let the call proceed
       } catch (err) {
         appendFileSync(analysisLog, JSON.stringify({ ts, toolName: event.toolName, error: String(err) }) + "\n");
-        console.warn(`[nancy] ⚠️  analysis failed for ${event.toolName}, requiring manual approval (fail-safe): ${String(err)}`);
-        return {
-          requireApproval: {
-            title: "NanCy: security analysis failed",
-            description: `Could not verify the safety of ${event.toolName} (${String(err)}). Approve manually to continue.`,
-            severity: "critical",
-            allowedDecisions: ["allow-once", "deny"],
-          },
-        };
+        const reason = `Could not verify the safety of ${event.toolName} (${String(err)}).`;
+        console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: analysis failed, blocking as precaution: ${String(err)}`);
+        appendFileSync(logFile, JSON.stringify({ ts, event: "blocked_analysis_error", toolName: event.toolName, error: String(err) }) + "\n");
+        notifyBlocked(reason, `${sessionKey}:analysis-error:${event.toolName}`);
+        return { block: true, blockReason: reason };
       }
     });
 

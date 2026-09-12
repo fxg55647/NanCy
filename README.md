@@ -33,7 +33,7 @@ This section separates what actually runs today (✅, in `src/index.ts`) from wh
 
 ### 1. Stateless Security Interruption Layer (SSIL) ✅
 
-Each tool call — and each outbound message the agent sends through any channel — is judged by a fresh, one-shot LLM request with no persisted conversation of its own — the analysis model can't be talked around turn-by-turn the way a chatty, stateful guard could. It is given a snapshot of relevant facts (the confirmed task, recent tool calls, recent stated reasoning) as plain context in that single prompt, not a running relationship it can be "gaslit" into trusting. Covering outbound messages, not just tool calls, matters because some channels (email via OpenClaw's `imap` extension, for one) dispatch content through message delivery rather than a distinct tool — `before_tool_call` alone would never see it. Outbound-message analysis has one limitation tool-call analysis doesn't: there's no "pause and ask" option for a message in flight, so an uncertain CLARIFY verdict is treated as BLOCK, and analysis failures fail *open* (the message still sends) rather than fail-safe, since muting the agent entirely isn't a graceful fallback either.
+Each tool call — and each outbound message the agent sends through any channel — is judged by a fresh, one-shot LLM request with no persisted conversation of its own — the analysis model can't be talked around turn-by-turn the way a chatty, stateful guard could. It is given a snapshot of relevant facts (the confirmed task, recent tool calls, recent stated reasoning) as plain context in that single prompt, not a running relationship it can be "gaslit" into trusting. Covering outbound messages, not just tool calls, matters because some channels (email via OpenClaw's `imap` extension, for one) dispatch content through message delivery rather than a distinct tool — `before_tool_call` alone would never see it. The only interactive decision in the whole flow is the one task confirmation (feature #2) — an uncertain CLARIFY verdict, for a tool call or an outbound message, is always treated as BLOCK rather than pausing to ask again, since native pause-for-approval delivery isn't available on every channel. Tool-call analysis failures fail *closed* (the action is blocked); outbound-message analysis failures fail *open* (the message still sends), since muting the agent's replies entirely isn't a graceful fallback either.
 
 ### 2. Intent Confirmation & Gap Detection ✅ confirmation / 🧭 gap detection
 
@@ -225,15 +225,9 @@ openclaw agents add worker --workspace /path/to/worker-workspace --non-interacti
 
 Omit `workerAgentId` to still get the main-session hard gate and idle reset without automatic worker spawning.
 
-#### CLARIFY verdicts need the channel's approval surface enabled
+#### Only one interactive step: the initial confirmation
 
-When NanCy returns CLARIFY (feature #1), OpenClaw shows the user an approve/deny prompt on the originating channel via `requireApproval`. On at least Telegram, that surface is gated by the channel's own exec-approval setting and is **off by default** — with it off, a CLARIFY verdict fails outright (`Plugin approval unavailable: the ... initiating surface is disabled`) instead of pausing for a decision, and the agent will typically retry the same call repeatedly until it gives up. Enable it for your channel, e.g.:
-
-```bash
-openclaw config set channels.telegram.execApprovals.enabled true
-```
-
-This requires a full gateway restart (`openclaw gateway run` again, or restart the service) — it does not hot-reload like most plugin config changes.
+NanCy asks for exactly one interactive decision per task — the confirmation in step 3 below. Everything after that is autonomous: CLARIFY verdicts during execution (feature #1) block outright rather than pausing to ask again, because native pause-for-approval delivery isn't available on every channel (Telegram in particular has no native plugin-approval surface at all, so a pause there fails outright instead of actually reaching anyone — not something NanCy can fix from config). If NanCy can't verify an action, it fails closed and the agent explains what happened and why in its own next reply, instead of the operator seeing a stream of low-level block errors.
 
 ### 3. Add task confirmation rules to your agent
 
