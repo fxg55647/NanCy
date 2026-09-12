@@ -723,7 +723,8 @@ Reply ONLY with valid JSON — no other text:
     });
 
     api.on("llm_output", (event, ctx) => {
-      appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "llm_output", sessionKey: ctx.sessionKey, provider: event.provider, model: event.model, texts: event.assistantTexts }) + "\n");
+      if (ctx.sessionKey && ctx.trigger) sessionTriggerByKey.set(ctx.sessionKey, ctx.trigger);
+      appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "llm_output", sessionKey: ctx.sessionKey, trigger: ctx.trigger, provider: event.provider, model: event.model, texts: event.assistantTexts }) + "\n");
     });
 
     api.on("message_sending", async (event, ctx) => {
@@ -740,7 +741,7 @@ Reply ONLY with valid JSON — no other text:
       } else {
         console.log(`[nancy] outbound: ${content.slice(0, 100).trim()}${content.length > 100 ? "…" : ""}`);
       }
-      appendFileSync(logFile, JSON.stringify({ ts, event: "message_sending", channel: ctx.channelId ?? "unknown", text: content }) + "\n");
+      appendFileSync(logFile, JSON.stringify({ ts, event: "message_sending", channel: ctx.channelId ?? "unknown", text: content, trigger: ctx.sessionKey ? sessionTriggerByKey.get(ctx.sessionKey) : undefined }) + "\n");
 
       // Intent Anchoring: the agent only *asks* for confirmation — NanCy is the
       // one that decides, from the user's actual reply below, whether it was given.
@@ -890,6 +891,23 @@ Use BLOCK when the message contains data or requests that were not authorized by
     const recentCallsBySession = new Map<string, Array<{ ts: string; toolName: string; params: unknown }>>();
     const recentReasoningBySession = new Map<string, Array<{ ts: string; text: string }>>();
 
+    // Cron-run correlation, keyed by sessionKey. before_tool_call's ctx
+    // (PluginHookToolContext) and message_sending's ctx (PluginHookMessageContext)
+    // never carry a `trigger` field — verified against openclaw@2026.9.4's
+    // compiled hook-context builders (buildToolContext in
+    // agent-tools.before-tool-call, toPluginMessageContext in
+    // message-hook-mappers): both allowlist their fields explicitly and neither
+    // copies `trigger` through, even though the richer internal HookContext has
+    // it. `llm_output`'s ctx (PluginHookAgentContext), by contrast, is built via
+    // buildAgentHookContext, which does forward `trigger` — so it's captured
+    // there (below) and looked up here by sessionKey when gating tool calls.
+    const sessionTriggerByKey = new Map<string, string>();
+
+    function isCronTrigger(sessionKey: string | undefined): boolean {
+      if (!sessionKey) return false;
+      return sessionTriggerByKey.get(sessionKey) === "cron";
+    }
+
     function pushRecentCall(sessionKey: string | undefined, entry: { ts: string; toolName: string; params: unknown }): void {
       const key = sessionKey ?? UNKNOWN_SESSION_KEY;
       const arr = recentCallsBySession.get(key) ?? [];
@@ -932,6 +950,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
       callCounters.delete(key);
       terminatedSessions.delete(key);
       lastActivityMs.delete(key);
+      sessionTriggerByKey.delete(key);
       const blockAlertPrefix = `${key}:`;
       for (const alertKey of recentBlockAlerts.keys()) {
         if (alertKey.startsWith(blockAlertPrefix)) recentBlockAlerts.delete(alertKey);
@@ -995,7 +1014,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
     api.on("before_tool_call", async (event, ctx) => {
       const ts = new Date().toISOString();
       const sessionKey = ctx.sessionKey ?? UNKNOWN_SESSION_KEY;
-      appendFileSync(logFile, JSON.stringify({ ts, event: "before_tool_call", sessionKey: ctx.sessionKey, runId: ctx.runId, toolName: event.toolName, params: event.params }) + "\n");
+      appendFileSync(logFile, JSON.stringify({ ts, event: "before_tool_call", sessionKey: ctx.sessionKey, runId: ctx.runId, toolName: event.toolName, params: event.params, trigger: sessionTriggerByKey.get(sessionKey) }) + "\n");
       touchActivity(sessionKey);
 
       // Hard block, independent of LLM analysis: once a session is terminated
@@ -1053,19 +1072,28 @@ Use BLOCK when the message contains data or requests that were not authorized by
       // information passively — state-changing tools are forbidden outright,
       // independent of LLM analysis. Real work must go through a confirmed
       // task, which NanCy spawns as an isolated worker session (message_received above).
-      if (isMainSession(ctx.sessionKey)) {
+      // Cron-triggered runs get the identical treatment: they never went through
+      // a chat exchange where a human could confirm a task either, so an
+      // unattended scheduled run must not get free tool access just because its
+      // sessionKey isn't mainSessionKey. See isCronTrigger/sessionTriggerByKey above.
+      const cronRun = isCronTrigger(ctx.sessionKey);
+      if (isMainSession(ctx.sessionKey) || cronRun) {
         if (MAIN_ALWAYS_BLOCK.has(event.toolName)) {
-          const reason = `'${event.toolName}' is not permitted in the main session. Create a confirmed task first.`;
+          const reason = cronRun
+            ? `'${event.toolName}' is not permitted for a cron-triggered run. Create a confirmed task first.`
+            : `'${event.toolName}' is not permitted in the main session. Create a confirmed task first.`;
           console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: ${reason}`);
-          appendFileSync(logFile, JSON.stringify({ ts, event: "blocked_main_session", toolName: event.toolName, reason }) + "\n");
+          appendFileSync(logFile, JSON.stringify({ ts, event: "blocked_main_session", toolName: event.toolName, reason, trigger: cronRun ? "cron" : undefined }) + "\n");
           return { block: true, blockReason: reason };
         }
         if (event.toolName === "browser") {
           const cmd = String((event.params as Record<string, unknown>)?.command ?? "");
           if (MAIN_BROWSER_BLOCK_CMDS.has(cmd)) {
-            const reason = `Browser '${cmd}' is not permitted in the main session. Create a confirmed task first.`;
+            const reason = cronRun
+              ? `Browser '${cmd}' is not permitted for a cron-triggered run. Create a confirmed task first.`
+              : `Browser '${cmd}' is not permitted in the main session. Create a confirmed task first.`;
             console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: ${reason}`);
-            appendFileSync(logFile, JSON.stringify({ ts, event: "blocked_main_session", toolName: event.toolName, command: cmd, reason }) + "\n");
+            appendFileSync(logFile, JSON.stringify({ ts, event: "blocked_main_session", toolName: event.toolName, command: cmd, reason, trigger: cronRun ? "cron" : undefined }) + "\n");
             return { block: true, blockReason: reason };
           }
         }
