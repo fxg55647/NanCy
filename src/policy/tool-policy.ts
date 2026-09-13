@@ -37,10 +37,28 @@ const SAFE_EXEC = /^(ls|pwd|mkdir|echo|cat|head|tail|whoami|date|cd)\b/;
 // Any of these anywhere in the command forces full analysis, regardless of
 // which verb the command starts with.
 const SHELL_METACHARACTERS = /[;&|`$(){}<>]|\n/;
+// Of SAFE_EXEC's verbs, only cat/head/tail read arbitrary file *contents* —
+// ls/pwd/whoami/date reveal metadata at most, and mkdir/cd/echo never read a
+// file's content at all. A bare prefix match let e.g. `cat ~/.ssh/id_rsa` or
+// `cat ~/.aws/credentials` skip analysis entirely purely because "cat" is on
+// the allowlist — found via an eval scenario deliberately chaining calls
+// into credential access (see scripts/eval-scenarios.json /
+// scripts/run-eval.mts's macro-review section); the aggregate behavioral
+// review caught the overall pattern that time, but a single such read
+// should not rely on that as its only backstop.
+const CONTENT_READING_SAFE_VERBS = /^(cat|head|tail)\b/;
+// Deliberately not exhaustive — a deterministic backstop for well-known/
+// common credential-file shapes, not a substitute for full analysis.
+// Anything not matching SAFE_EXEC at all already goes through full
+// analysis regardless of this list.
+const SENSITIVE_PATH_PATTERN =
+  /(\.ssh[\\/]|\.aws[\\/](credentials|config)\b|\.env\b|[\\/]etc[\\/](shadow|passwd)\b|id_rsa|id_ed25519|id_ecdsa|\.pem\b|\.p12\b|\.pfx\b|\.pgpass\b|\.netrc\b|\.npmrc\b|\.pypirc\b|git-credentials|\.docker[\\/]config\.json|Login Data|cookies\.sqlite|credentials\.json|secrets\.json)/i;
 
 function isSafeExecCommand(cmd: string): boolean {
   const trimmed = cmd.trim();
-  return SAFE_EXEC.test(trimmed) && !SHELL_METACHARACTERS.test(trimmed);
+  if (!SAFE_EXEC.test(trimmed) || SHELL_METACHARACTERS.test(trimmed)) return false;
+  if (CONTENT_READING_SAFE_VERBS.test(trimmed) && SENSITIVE_PATH_PATTERN.test(trimmed)) return false;
+  return true;
 }
 // process's "list"/"poll"/"log" actions only read state (running
 // processes, output so far); everything else (write/send-keys/paste/
