@@ -22,6 +22,7 @@ Status: early-stage, unaudited, "research and development only" per README's own
 - `src/policy/tool-policy.ts` — main/cron default-deny allowlist, browser action classification, `shouldAnalyze()`.
 - `src/policy/denial-policy.ts` — normalized denial classification, runtime-scoped total/burst counters, deterministic termination, and burst-review triggering.
 - `src/confirmation/protocol.ts` — `parseConfirmationRequest()` / `isAffirmativeReply()` — intent confirmation flow (feature #2).
+- `src/confirmation/gap-detection.ts` — advisory-only LLM check flagging unspecified decision points in a proposed confirmation before the human sees it (feature #2's other half). See `docs/architecture/gap-detection.md`.
 - `src/confirmation/tasks.ts` — per-session confirmed-task authorization and pending-confirmation state.
 - `src/workers/worker-manager.ts` — spawns/waits-for/cleans-up the isolated worker session per confirmed task.
 - `src/notifications/telegram.ts` — Telegram alerting/status pushes, block-alert debounce.
@@ -32,7 +33,7 @@ Status: early-stage, unaudited, "research and development only" per README's own
 
 ## Feature status (see README §"Key Technical Features" for full detail)
 
-✅ implemented: SSIL one-shot analysis (#1), intent confirmation (#2, gap-detection still 🧭), Domain Border Control (#3), main/worker session split (#7, optional), behavioral review plus deterministic denial termination (#8), permanent operator policy (#9), write-protection for core files (#6).
+✅ implemented: SSIL one-shot analysis (#1), intent confirmation & gap detection (#2), Domain Border Control (#3), main/worker session split (#7, optional), behavioral review plus deterministic denial termination (#8), permanent operator policy (#9), write-protection for core files (#6).
 
 🧭 not implemented: Contextual Scrambler / PIDD integration (#4).
 
@@ -57,5 +58,6 @@ Work has been on the operational/runtime side: cron-triggered runs now gated lik
 - `MISCONCEPTIONS.md` — objections/FAQ (collusion, agent talking to NanCy directly, AI-reviewer bias)
 - `RELATED-WORK.md` — positioning vs. LlamaFirewall AlignmentCheck, ClawGuard, Google ADK hooks
 - `docs/architecture/denial-escalation-and-clarification.md` — implemented denial ceiling/burst-review rules plus the not-yet-implemented ticketed clarification design; includes state transitions, release conditions, and tests
+- `docs/architecture/gap-detection.md` — design rationale for the advisory unspecified-decision-point check (feature #2's gap-detection half): prompt design, failure modes, config, and known limitations
 - `TESTING.md` — how to test changes: `npm test` (mocked, fast) vs. a standalone harness against the real reviewer model (genuine verdicts, zero live-gateway risk), the confirmed-task file format, and why the live gateway must never be stopped/restarted for testing
 - `EVAL-RESULTS.md` — generated report from `scripts/run-eval.mts` (a fixed, hand-written scenario set in `scripts/eval-scenarios.json`, run against the real configured reviewer model via the Option B pattern). Regenerate with `node --experimental-strip-types scripts/run-eval.mts`; re-run whenever `analysis.model` or the policy/analysis modules change, to catch reviewer-behavior regressions.
