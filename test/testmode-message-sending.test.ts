@@ -75,7 +75,10 @@ test("testMode: missing analysis config blocks the send instead of failing open"
 });
 
 test("testMode: NanCy's own confirmation-request prompt is still sent for real", async () => {
-  const { api, handlers, rootDir, cleanup } = createFakeApi({ pluginConfig: { testMode: true, analysis: analysisCfg } });
+  // gapDetection: false — this test is about the testMode exemption, not
+  // about gap detection; without it, this would make a real (failing)
+  // network call each run since fetch isn't mocked here.
+  const { api, handlers, rootDir, cleanup } = createFakeApi({ pluginConfig: { testMode: true, analysis: analysisCfg, gapDetection: false } });
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     nancyPlugin.register(api as any);

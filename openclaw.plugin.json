@@ -150,6 +150,10 @@
       "unconfirmedInfoLookupLimitPerHour": {
         "type": "number",
         "description": "Deterministic per-session cap on allowUnconfirmedInfoLookups grants per rolling hour, independent of the reviewer's own judgment. Default 10."
+      },
+      "gapDetection": {
+        "type": "boolean",
+        "description": "Advisory-only LLM check on a proposed confirmation's description, flagging concrete decision points left unspecified (price ceiling, delivery deadline, compatibility requirements, etc.) as a NanCy-authored note appended after the agent's own message, before the human decides. Never blocks or delays sending; skipped entirely if analysis isn't configured or the check errors. Default true."
       }
     }
   }

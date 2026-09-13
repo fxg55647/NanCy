@@ -15,6 +15,7 @@ import { metadataPreflightPrompt, outboundDestinationMetadata, toolDestinationMe
 import { extractCandidateUrl, checkDomainBorder } from "./policy/domain-policy.ts";
 import { fetchBrowserSnapshot, snapshotFilename, uniqueSnapshotPath, pruneSnapshots, MAX_SNAPSHOTS } from "./browser/snapshot.ts";
 import { parseConfirmationRequest, isAffirmativeReply } from "./confirmation/protocol.ts";
+import { buildGapDetectionPrompt, parseGapDetectionResponse, appendGapNote } from "./confirmation/gap-detection.ts";
 import { parseVerdict } from "./analysis/verdict.ts";
 import { callLlm } from "./analysis/client.ts";
 import { rotateLogIfLarge, logDecision } from "./logging/logger.ts";
@@ -247,6 +248,16 @@ export default definePluginEntry({
       }
 
       if (confirmationRequest) {
+        // Only the confirmation-request format itself is exempt from full
+        // Intent-Anchoring review below — it's a fixed, NanCy-recognized
+        // question, not agent-chosen content. A "Reasoning:" prefix is NOT
+        // exempted the same way: that's just a self-reported label on
+        // otherwise-arbitrary agent-authored text, so an agent (or a prompt
+        // injection) could prepend it to any message to skip analysis
+        // entirely. This exemption applies in test mode too — see the
+        // testMode doc comment on NancyConfig for why sending it for real
+        // is not a new exposure test mode wouldn't already have.
+        //
         // An empty (or whitespace-only) description would become the sole
         // authorization anchor for every action the resulting worker takes —
         // accepting it verbatim defeats Intent Anchoring before it starts.
@@ -261,6 +272,29 @@ export default definePluginEntry({
           recordDenial(messageSessionKey, { reasonCode: "confirmation_description_empty", securitySignal: false, ts, ids: logIds });
           return { cancel: true, cancelReason: reason };
         }
+
+        // Gap detection (README feature #2's other half): advisory only,
+        // never blocks or delays sending — a note appended after the
+        // agent's own fixed-template message, before the human decides.
+        // See confirmation/gap-detection.ts.
+        let outgoingContent = content;
+        if ((nancyConfig.gapDetection ?? true) && nancyConfig.analysis) {
+          try {
+            const gapPrompt = buildGapDetectionPrompt(confirmationRequest.description, getPolicyContext());
+            const gapText = await callLlm(nancyConfig.analysis, gapPrompt);
+            const gaps = parseGapDetectionResponse(gapText);
+            logDecision(analysisLog, ts, "confirmation_gap_check", logIds, { id: confirmationRequest.id, gaps });
+            if (gaps.length > 0) {
+              outgoingContent = appendGapNote(content, gaps);
+              console.log(`[nancy] confirmation id=${confirmationRequest.id} — gap(s) surfaced: ${gaps.join("; ")}`);
+            }
+          } catch (err) {
+            // Advisory only — a failed check must never block or alter the
+            // confirmation itself.
+            logDecision(analysisLog, ts, "confirmation_gap_check_error", logIds, { id: confirmationRequest.id, error: String(err) });
+          }
+        }
+
         if (!ctx.sessionKey) {
           console.warn(`[nancy] ⚠️  confirmation request seen with no sessionKey to correlate a reply against — ignoring`);
         } else {
@@ -272,28 +306,22 @@ export default definePluginEntry({
           // rawContent/messageId let message_sent (below) and message_received
           // correlate the eventual reply to this exact delivered message, not
           // just to "some reply in the same session" — see message_received.
-          confirmations.pending.set(ctx.sessionKey, { ...confirmationRequest, ts: Date.now(), rawContent: content });
+          // Must match whatever is actually sent (outgoingContent), not the
+          // agent's original content, or a gap-noted message would never
+          // correlate with its own message_sent/message_received events.
+          confirmations.pending.set(ctx.sessionKey, { ...confirmationRequest, ts: Date.now(), rawContent: outgoingContent });
           console.log(`[nancy] confirmation requested: id=${confirmationRequest.id}`);
           logDecision(logFile, ts, "confirmation_requested", logIds, { id: confirmationRequest.id, description: confirmationRequest.description });
         }
-      }
 
-      // Only the confirmation-request format itself is exempt — it's a fixed,
-      // NanCy-recognized question, not agent-chosen content. A "Reasoning:"
-      // prefix is NOT exempted: that's just a self-reported label on
-      // otherwise-arbitrary agent-authored text, so an agent (or a prompt
-      // injection) could prepend it to any message to skip analysis entirely.
-      // Reasoning content still gets recorded above for context, but must
-      // still pass through Intent Anchoring below like any other outbound text.
-      //
-      // This exemption applies in test mode too — see the testMode doc
-      // comment on NancyConfig for why sending it for real is not a new
-      // exposure test mode wouldn't already have.
-      if (confirmationRequest) {
         if (nancyConfig.testMode) {
           logDecision(logFile, ts, "test_mode_confirmation_sent_for_real", logIds, { channel: ctx.channelId ?? "unknown", to: event.to });
         }
-        return;
+        // undefined (unchanged) unless gap detection actually appended a
+        // note — returning {content} identical to the input is harmless at
+        // runtime but needlessly differs from "send as given" for anything
+        // observing the exact return shape.
+        return outgoingContent === content ? undefined : { content: outgoingContent };
       }
 
       // Cron runs never passed through an interactive confirmation exchange,

@@ -103,6 +103,17 @@ export interface NancyConfig {
   // SECURITY-PHILOSOPHY.md's "limit how many X can be performed within a
   // given period." Default 10.
   unconfirmedInfoLookupLimitPerHour?: number;
+  // Advisory-only (never blocks/delays sending): a one-shot LLM check run
+  // against a proposed confirmation's description, looking for concrete
+  // decision points plausibly relevant to the task that were left
+  // unspecified (a price ceiling, a delivery deadline, compatibility
+  // requirements, etc. — see confirmation/gap-detection.ts). Detected gaps
+  // are appended as a clearly separate NanCy-authored note after the
+  // agent's own fixed-template message, before the human decides whether to
+  // approve it. Skipped entirely (fails open, sends unmodified) when
+  // analysis isn't configured or the check itself errors — this is a
+  // judgment aid, not a security gate. Default true.
+  gapDetection?: boolean;
 }
 
 // Best-effort SecretInput resolution: config fields like telegram.botToken can be

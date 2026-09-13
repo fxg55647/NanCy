@@ -144,14 +144,12 @@ test("confirmation: an empty description is rejected outright, not accepted as a
   }
 });
 
-// Documents a known, intentional limitation rather than a fix: README
-// feature #2 marks gap-detection as not implemented (🧭) — NanCy checks
-// *who* confirmed (feature #2's implemented half) but never checks whether
-// the proposed description itself is vague, ambiguous, or contains
-// unfilled placeholders. This test exists so a future change to that
-// status is caught here (the assertion would start failing) rather than
-// silently drifting out of sync with what the docs claim.
-test("confirmation: a vague description full of unfilled placeholders is still granted as-is (documented gap, not a bug)", async () => {
+// Gap detection (see test/gap-detection.test.ts for the feature itself)
+// needs a reviewer model to run at all — with none configured, a vague
+// description full of unfilled placeholders is still granted exactly as
+// written, the same as before that feature existed. This documents that
+// specific fallback, not an absence of the feature.
+test("confirmation: with no analysis configured, a vague description is still granted as-is (gap detection has nothing to run it with)", async () => {
   const { api, handlers, rootDir, cleanup } = createFakeApi();
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -159,7 +157,7 @@ test("confirmation: a vague description full of unfilled placeholders is still g
     const vague = "Buy tickets to <DESTINATION> for <NUMBER> people using [PAYMENT METHOD], then let them know somehow.";
     const content = confirmationContent("100007", vague);
     const result = await handlers.message_sending({ content }, { sessionKey: "sess-vague", channelId: "test" });
-    assert.equal(result, undefined, "no analysis is configured to judge this, and none would be consulted about vagueness even if it were");
+    assert.equal(result, undefined, "no analysis is configured, so gap detection has no reviewer model to consult and is skipped");
 
     handlers.message_received({ content: "y" }, { sessionKey: "sess-vague" });
     assert.equal(existsSync(auditRecordPath(rootDir, "100007")), true, "NanCy currently grants this exactly as written — see README feature #2's gap-detection status");

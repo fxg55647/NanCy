@@ -132,7 +132,10 @@ test("wrong write destination is rejected before payload reaches the reviewer", 
     requestBodies.push(String(init?.body ?? ""));
     return { ok: true, json: async () => ({ choices: [{ message: { content: "VERDICT: BLOCK\nREASON: destination is outside the task" } }] }) };
   };
-  const { api, handlers, rootDir, cleanup } = createFakeApi({ pluginConfig: { analysis: analysisCfg } });
+  // gapDetection: false — this test counts fetch calls to prove the
+  // destination preflight skips the full review; gap detection during the
+  // confirmDirectTask setup step would otherwise add an unrelated call.
+  const { api, handlers, rootDir, cleanup } = createFakeApi({ pluginConfig: { analysis: analysisCfg, gapDetection: false } });
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     nancyPlugin.register(api as any);
@@ -158,7 +161,8 @@ test("wrong outbound recipient is rejected before message content reaches the re
     requestBodies.push(String(init?.body ?? ""));
     return { ok: true, json: async () => ({ choices: [{ message: { content: "VERDICT: BLOCK\nREASON: recipient is outside the task" } }] }) };
   };
-  const { api, handlers, cleanup } = createFakeApi({ pluginConfig: { analysis: analysisCfg } });
+  // gapDetection: false — see the write-destination test above for why.
+  const { api, handlers, cleanup } = createFakeApi({ pluginConfig: { analysis: analysisCfg, gapDetection: false } });
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     nancyPlugin.register(api as any);
