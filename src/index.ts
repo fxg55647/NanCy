@@ -225,7 +225,42 @@ export default definePluginEntry({
       // Intent Anchoring: the agent only *asks* for confirmation — NanCy is the
       // one that decides, from the user's actual reply below, whether it was given.
       const confirmationRequest = parseConfirmationRequest(content);
+
+      // A near-miss on the fixed template (wrong id length, missing/altered
+      // closing line, a stray character) used to fall straight through to
+      // full LLM review as an ordinary message: it could still get sent, but
+      // nothing was ever recorded in `confirmations.pending`, so the user's
+      // later "y" reply had nothing to answer and was silently dropped —
+      // the agent believes it asked correctly and waits forever. Catch the
+      // obvious near-miss deterministically (no LLM needed) and tell the
+      // agent to retry, rather than let a malformed confirmation masquerade
+      // as a real one. Narrow on purpose: only content that already tries
+      // to open with the fixed magic prefix trips this, so ordinary
+      // conversational text mentioning confirmations isn't affected.
+      if (!confirmationRequest && /^formal confirmation:/i.test(content.trim())) {
+        const reason =
+          "NanCy could not parse this as a valid confirmation request and did not send it. Check the exact required format — description, then the literal line \"Reply y to proceed, any other reply cancels.\", then a 6-10 digit id alone on the last line — and send it again.";
+        console.warn(`[nancy] ⚠️  malformed confirmation-request attempt — not recognized, not sent`);
+        logDecision(logFile, ts, "malformed_confirmation_attempt", logIds, { channel: ctx.channelId ?? "unknown" });
+        recordDenial(messageSessionKey, { reasonCode: "malformed_confirmation_attempt", securitySignal: false, ts, ids: logIds });
+        return { cancel: true, cancelReason: reason };
+      }
+
       if (confirmationRequest) {
+        // An empty (or whitespace-only) description would become the sole
+        // authorization anchor for every action the resulting worker takes —
+        // accepting it verbatim defeats Intent Anchoring before it starts.
+        // This is a narrow, deterministic floor (presence, not quality/
+        // vagueness — see README feature #2's documented gap-detection gap),
+        // never sent and never recorded as pending.
+        if (confirmationRequest.description.length === 0) {
+          const reason =
+            "NanCy could not accept this confirmation request: the description is empty. State clearly what you are about to do, then send the confirmation again.";
+          console.warn(`[nancy] ⚠️  confirmation id=${confirmationRequest.id} rejected — empty description`);
+          logDecision(logFile, ts, "confirmation_description_empty", logIds, { id: confirmationRequest.id });
+          recordDenial(messageSessionKey, { reasonCode: "confirmation_description_empty", securitySignal: false, ts, ids: logIds });
+          return { cancel: true, cancelReason: reason };
+        }
         if (!ctx.sessionKey) {
           console.warn(`[nancy] ⚠️  confirmation request seen with no sessionKey to correlate a reply against — ignoring`);
         } else {
