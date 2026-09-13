@@ -130,6 +130,8 @@ We operate on the principle that the agent is perpetually at risk of being confu
 
 **If the agent cannot be trusted, the supervision must be.**
 
+[NVIDIA argues](https://developer.nvidia.com/blog/run-autonomous-self-evolving-agents-more-safely-with-nvidia-openshell/) that useful long-running agents require three things at once: **safety, capability, and autonomy**. OpenClaw can be seen as a rebellious—at times almost radical—answer to the demand for agents capable enough to do real work without constant supervision. NanCy cannot make a general-purpose agent perfectly safe. Its bet is more practical: give up a small amount of unconstrained speed and convenience to gain a disproportionate amount of control, containment, and safety, while preserving most of the autonomy that made OpenClaw useful in the first place.
+
 ### **Pragmatism over Perfection**
 
 Our goal is not to achieve "unbreakable" absolute security—as such a thing rarely exists—but to provide a **significant improvement** over the current state of autonomous AI, especially OpenClaw. We are building a system that makes the commercial use of agents **rational, profitable and manageable.**
