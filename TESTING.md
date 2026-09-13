@@ -130,7 +130,52 @@ dance end-to-end, and it's sent for real in production anyway.
 **Always intercept `api.telegram.org`** in this tier (as above) if
 `telegramAlerts`/`telegramTaskReports` might be enabled in the config you
 copy — otherwise a test run can push a real, confusing notification to the
-operator's real phone.
+operator's real phone. Belt-and-suspenders: `createFakeApi()`'s `api.config`
+defaults to `{}`, so if you never copy `channels.telegram` into the
+`pluginConfig`/`api.config` you pass it, `telegramAlertsEnabled`/
+`telegramTaskReportsEnabled` resolve `false` regardless of what the live
+config says — do that *in addition to* the fetch intercept, not instead of
+it (a future code path could read `channels.telegram` some other way).
+
+### Practical gotchas, from actually running this tier once
+
+- **Finding the live config path**: don't guess
+  `~/.openclaw/openclaw.json` or hand-build it from `$env:USERPROFILE` inside
+  a `Bash`-tool call that shells out to `powershell -Command "...$env:...`"`
+  — the outer POSIX shell can mangle the `$env:` reference before PowerShell
+  ever sees it, silently producing a wrong path that then reads as "file
+  doesn't exist." Either run `openclaw config file` (prints the actual active
+  config path, read-only, safe) or check the path with a PowerShell-tool call
+  directly rather than nesting it inside the Bash tool.
+- **A standalone harness script placed *outside* the `nancy` repo** (e.g. in
+  a scratch/temp dir) has no ancestor `package.json` with `"type": "module"`,
+  so `node --experimental-strip-types <file>.ts` on it resolves as CommonJS
+  and rejects top-level `await`/`import`. Name it `.mts` instead — Node
+  always treats that extension as ESM regardless of the nearest
+  `package.json` — or run it from inside the repo.
+- **`createFakeApi()`'s default `subagent.waitForRun` resolves immediately**,
+  which makes NanCy tear the worker session down (`deleteSession`) right
+  after spawn — so a `before_tool_call` you fire moments later against
+  `agent:<workerAgentId>:task-<id>` already sees no authorization. To
+  actually probe a worker session's behavior after confirming it, pass a
+  `subagent` override with `waitForRun: () => new Promise(() => {})` (never
+  resolves), the same trick `test/worker-task-authorization.test.ts` uses to
+  keep two tasks genuinely concurrent — this keeps the session "live" so you
+  can fire as many `before_tool_call`s at it as you want.
+- **The worker session key is derived from the task id you pick**, not from
+  whatever session confirmed it: confirm with
+  `confirmTask("sess-1", "424242", description)` and then probe
+  `agent:<workerAgentId>:task-424242` — those are two different session keys
+  and mixing them up looks like "authorization never took," when it's just
+  the wrong key.
+- A deliberately mismatched action (e.g. confirm a "look up flight prices,
+  never buy" task, then send a `browser act click` on a buy button, or an
+  `exec` shelling a payment POST) is a good sanity check that the real
+  reviewer model — not just the plumbing — catches intent mismatches. Note
+  that NanCy's context-check step can reasonably block a *literally* benign
+  follow-up action too, if it looks like a continuation of a page/flow it
+  just blocked (e.g. still typing into a field on what it believes is a
+  checkout page) — that's the reviewer using state, not a bug in the harness.
 
 ## Confirmed-task "record", for either tier
 
