@@ -177,6 +177,17 @@ it (a future code path could read `channels.telegram` some other way).
   just blocked (e.g. still typing into a field on what it believes is a
   checkout page) — that's the reviewer using state, not a bug in the harness.
 
+## Reusable scenario eval (`scripts/run-eval.mts`)
+
+A fixed, hand-written set of scenarios (`scripts/eval-scenarios.json`) — protected-path writes, the main/cron default-deny gate, the no-confirmed-task hard block, Domain Border Control, and genuine intent-match/mismatch/ambiguous cases — runnable end-to-end against the real configured reviewer model with the exact Option B safety properties above (`testMode: true`, live gateway never touched, no channels/telegram config passed into the harness). Run it and it (re)writes `EVAL-RESULTS.md` at the repo root:
+
+```
+node --experimental-strip-types scripts/run-eval.mts
+node --experimental-strip-types scripts/run-eval.mts --config=C:\path\to\openclaw.json
+```
+
+Re-run this after changing `analysis.model` or anything under `src/policy/`/`src/analysis/` to catch reviewer-behavior regressions — it's the fastest way to see, in one shot, whether the real model still reaches the same verdicts across every gate NanCy has. Edit `scripts/eval-scenarios.json` to add scenarios; each needs a `sessionMode` (`"none"`, `"main"`, or `"worker"`) and, for `"worker"`, a `taskId` (6–10 digits) plus a `task` description — see the comments at the top of `run-eval.mts` for how session keys and task confirmation are derived.
+
 ## Confirmed-task "record", for either tier
 
 There is no `tasks/current.json` file anymore — an earlier version stored
@@ -239,10 +250,20 @@ gate, in every session type, regardless of what it actually did.
   (`start`/`stop`/`navigate`/`open`/`upload`/... — see
   `BROWSER_INTERACTIVE_ACTIONS`) or `action: "act"` with an interactive
   `kind` (`click`/`type`/`fill`/`select`/`drag`/`evaluate`/... — see
-  `BROWSER_INTERACTIVE_ACT_KINDS`). These get a real LLM verdict — and a
-  benign one is routinely ALLOWed even with *no* confirmed task at all,
-  because the BLOCK/CLARIFY criteria are about suspicious/mismatched
-  intent, not "was there a task."
+  `BROWSER_INTERACTIVE_ACT_KINDS`). These get a real LLM verdict.
+  **With no confirmed task**, every one of these hard-blocks outright before
+  any LLM call — **except `web_search`/`web_fetch`**, which (with
+  `allowUnconfirmedInfoLookups`, default **on**) still reach the real
+  reviewer, judged against a fixed generic "this must be a harmless,
+  read-only information lookup" baseline (`buildUnconfirmedInfoLookupTask` in
+  `confirmation/tasks.ts`) instead of an actual confirmed task — so a benign
+  search is routinely ALLOWed with no task, but an exfiltration-shaped
+  `web_fetch` URL is not. Capped independently of the reviewer's own
+  judgment by `unconfirmedInfoLookupLimitPerHour` (default 10/session/hour) —
+  see `scripts/eval-scenarios.json`'s `unconfirmed-info-lookup-*` scenarios
+  and `test/unconfirmed-info-lookup.test.ts` for both properties verified.
+  Set `allowUnconfirmedInfoLookups: false` to go back to the old strict
+  behavior for these two tools as well.
 - **Everything else** (e.g. a plain `read`, or `browser` with a passive
   `action`) skips analysis entirely and passes straight through — instant,
   free, no LLM call.

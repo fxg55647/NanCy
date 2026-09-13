@@ -1,5 +1,5 @@
 import type { AgentPaths } from "../policy/protected-paths.ts";
-import type { TaskAuthorization } from "../confirmation/tasks.ts";
+import type { ConfirmedTask, TaskAuthorization } from "../confirmation/tasks.ts";
 import type { SessionState } from "../state.ts";
 
 export interface ContextBuilderDeps {
@@ -14,8 +14,16 @@ export interface ContextBuilderDeps {
 export function createContextBuilder(deps: ContextBuilderDeps) {
   const { taskAuth, state, getPolicyContext } = deps;
 
-  function buildAnalysisContext(paths: AgentPaths, sessionKey: string | undefined, opts: { excludeMostRecentCall?: boolean } = {}) {
-    const currentTask = taskAuth.getCurrentTask(sessionKey);
+  function buildAnalysisContext(
+    paths: AgentPaths,
+    sessionKey: string | undefined,
+    opts: { excludeMostRecentCall?: boolean; taskOverride?: ConfirmedTask | null } = {},
+  ) {
+    // taskOverride lets before_tool_call substitute the generic
+    // allowUnconfirmedInfoLookups fallback task (see confirmation/tasks.ts)
+    // when nothing is actually confirmed — undefined (the default) means
+    // "no override," not "no task," so the real lookup below still runs.
+    const currentTask = opts.taskOverride !== undefined ? opts.taskOverride : taskAuth.getCurrentTask(sessionKey);
     const allCalls = state.getRecentCalls(sessionKey);
     const calls = opts.excludeMostRecentCall ? allCalls.slice(0, -1) : allCalls;
     const reasoning = state.getRecentReasoning(sessionKey);

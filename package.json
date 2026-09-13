@@ -10,7 +10,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test test/*.test.ts",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm test",
+    "eval": "node --experimental-strip-types scripts/run-eval.mts"
   },
   "devDependencies": {
     "@types/node": "^22.20.2",

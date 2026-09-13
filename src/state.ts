@@ -36,9 +36,27 @@ export function createSessionState() {
   // fixed mode always redraws the same number, random mode doesn't.
   const macroReviewThresholds = new Map<string, number>();
   const lastActivityMs = new Map<string, number>();
+  // Deterministic backstop for allowUnconfirmedInfoLookups (see config.ts),
+  // independent of the reviewer's own judgment — fixed rolling window per
+  // session, reset once the window elapses rather than a true sliding window
+  // (simpler, and the exact boundary doesn't matter for a soft cap like this).
+  const infoLookupWindowBySession = new Map<string, { windowStart: number; count: number }>();
 
   function touchActivity(sessionKey: string): void {
     lastActivityMs.set(sessionKey, Date.now());
+  }
+
+  function consumeInfoLookupQuota(sessionKey: string | undefined, limit: number, windowMs: number): boolean {
+    const key = sessionKey ?? UNKNOWN_SESSION_KEY;
+    const now = Date.now();
+    const entry = infoLookupWindowBySession.get(key);
+    if (!entry || now - entry.windowStart >= windowMs) {
+      infoLookupWindowBySession.set(key, { windowStart: now, count: 1 });
+      return true;
+    }
+    if (entry.count >= limit) return false;
+    entry.count += 1;
+    return true;
   }
 
   function isCronTrigger(sessionKey: string | undefined): boolean {
@@ -84,6 +102,7 @@ export function createSessionState() {
     terminatedSessions.delete(key);
     lastActivityMs.delete(key);
     sessionTriggerByKey.delete(key);
+    infoLookupWindowBySession.delete(key);
   }
 
   return {
@@ -98,6 +117,7 @@ export function createSessionState() {
     pushRecentReasoning,
     getRecentCalls,
     getRecentReasoning,
+    consumeInfoLookupQuota,
     clearSession,
   };
 }

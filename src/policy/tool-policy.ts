@@ -173,3 +173,13 @@ export function isMainGateAllowed(toolName: string, params: unknown): boolean {
 }
 
 export const WEB_SNAPSHOT_TOOLS = new Set(["web_fetch"]);
+
+// Tools eligible for the generic "no confirmed task, but this still looks
+// like a plain info lookup" fallback baseline (see
+// allowUnconfirmedInfoLookups in config.ts / index.ts). Deliberately narrow:
+// every state-changing or destination-carrying tool (write, edit,
+// apply_patch, message, exec, process, interactive browser actions) is
+// excluded on purpose and still hard-blocks outright with no confirmed
+// task, even when this fallback is enabled — only these two read-only,
+// destination-free tools get it.
+export const UNCONFIRMED_INFO_LOOKUP_TOOLS = new Set(["web_search", "web_fetch"]);

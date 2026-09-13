@@ -39,7 +39,7 @@ Status: early-stage, unaudited, "research and development only" per README's own
 
 ## Recent focus (see `git log` for detail)
 
-Work has been on the operational/runtime side: cron-triggered runs now gated like the main session, a `testMode` for dry-running full tasks with zero real side effects, and tuning Telegram alerting (which block kinds page the operator vs. just log).
+Work has been on the operational/runtime side: cron-triggered runs now gated like the main session, a `testMode` for dry-running full tasks with zero real side effects, and tuning Telegram alerting (which block kinds page the operator vs. just log). Most recently, a scoped exception to the confirmed-task requirement: `allowUnconfirmedInfoLookups` (default on) lets `web_search`/`web_fetch` reach the real reviewer even with no confirmed task, judged against a fixed generic "harmless info lookup only" baseline instead of an actual task — every other tool needing semantic review still hard-blocks outright with no task, and a deterministic per-session hourly cap (`unconfirmedInfoLookupLimitPerHour`) backs the reviewer's own judgment.
 
 ## Logs & runtime artifacts (not source, don't treat as code)
 
@@ -56,3 +56,4 @@ Work has been on the operational/runtime side: cron-triggered runs now gated lik
 - `MISCONCEPTIONS.md` — objections/FAQ (collusion, agent talking to NanCy directly, AI-reviewer bias)
 - `RELATED-WORK.md` — positioning vs. LlamaFirewall AlignmentCheck, ClawGuard, Google ADK hooks
 - `TESTING.md` — how to test changes: `npm test` (mocked, fast) vs. a standalone harness against the real reviewer model (genuine verdicts, zero live-gateway risk), the confirmed-task file format, and why the live gateway must never be stopped/restarted for testing
+- `EVAL-RESULTS.md` — generated report from `scripts/run-eval.mts` (a fixed, hand-written scenario set in `scripts/eval-scenarios.json`, run against the real configured reviewer model via the Option B pattern). Regenerate with `node --experimental-strip-types scripts/run-eval.mts`; re-run whenever `analysis.model` or the policy/analysis modules change, to catch reviewer-behavior regressions.

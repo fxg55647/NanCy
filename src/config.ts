@@ -72,6 +72,26 @@ export interface NancyConfig {
   // Lets a task be run against NanCy end-to-end to see exactly what it would
   // decide. Default false.
   testMode?: boolean;
+  // Lets web_search/web_fetch through to the normal semantic reviewer even
+  // when no task has been confirmed for the session, judged against a fixed
+  // generic "this must be a harmless, read-only information lookup" baseline
+  // instead of a real confirmed task (see buildUnconfirmedInfoLookupTask).
+  // Deliberately narrower than turning off the confirmed-task requirement in
+  // general: every other tool that requires semantic review (write, edit,
+  // apply_patch, message, exec, process, interactive browser actions) still
+  // hard-blocks outright with no confirmed task, exactly as before — only
+  // these two read-only, destination-free tools get this fallback. Domain
+  // Border Control and the real reviewer still run on every call either way;
+  // this only changes what happens when there is no confirmed task to check
+  // against. See unconfirmedInfoLookupLimitPerHour for the deterministic
+  // backstop. Default true.
+  allowUnconfirmedInfoLookups?: boolean;
+  // Deterministic per-session cap on allowUnconfirmedInfoLookups grants per
+  // rolling hour, independent of the reviewer's own judgment — a backstop in
+  // case the probabilistic reviewer is wrong repeatedly, per
+  // SECURITY-PHILOSOPHY.md's "limit how many X can be performed within a
+  // given period." Default 10.
+  unconfirmedInfoLookupLimitPerHour?: number;
 }
 
 // Best-effort SecretInput resolution: config fields like telegram.botToken can be

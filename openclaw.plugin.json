@@ -125,6 +125,14 @@
       "testMode": {
         "type": "boolean",
         "description": "Test/dry-run mode: before_tool_call analysis still runs and is fully logged as normal, but no tool call is ever actually allowed to execute — a call that would have been ALLOWED (or that never needed analysis) is hard-blocked at the last moment instead, with the real verdict/reason included in the block message. Lets a task run against NanCy end-to-end with zero risk of a real side effect. Default false."
+      },
+      "allowUnconfirmedInfoLookups": {
+        "type": "boolean",
+        "description": "Lets web_search/web_fetch through to the real reviewer even when no task is confirmed for the session, judged against a fixed 'this must be a harmless, read-only information lookup' baseline instead of a real confirmed task. Every other tool needing semantic review (write/edit/apply_patch/message/exec/process/interactive browser actions) still hard-blocks outright with no confirmed task. Domain Border Control and the real reviewer still run either way. See unconfirmedInfoLookupLimitPerHour. Default true."
+      },
+      "unconfirmedInfoLookupLimitPerHour": {
+        "type": "number",
+        "description": "Deterministic per-session cap on allowUnconfirmedInfoLookups grants per rolling hour, independent of the reviewer's own judgment. Default 10."
       }
     }
   }
