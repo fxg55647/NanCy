@@ -28,7 +28,13 @@ export function createSessionState() {
 
   // Per-session state for the main/worker split and behavioral review.
   const terminatedSessions = new Map<string, boolean>();
+  // Calls since the last macro-review for this session; reset to 0 each time
+  // a review fires (see macroReviewThresholds below).
   const callCounters = new Map<string, number>();
+  // The callCounters value that triggers the next macro-review, drawn fresh
+  // (via pickNextMacroReviewInterval) whenever it's unset or just consumed —
+  // fixed mode always redraws the same number, random mode doesn't.
+  const macroReviewThresholds = new Map<string, number>();
   const lastActivityMs = new Map<string, number>();
 
   function touchActivity(sessionKey: string): void {
@@ -74,6 +80,7 @@ export function createSessionState() {
     recentCallsBySession.delete(key);
     recentReasoningBySession.delete(key);
     callCounters.delete(key);
+    macroReviewThresholds.delete(key);
     terminatedSessions.delete(key);
     lastActivityMs.delete(key);
     sessionTriggerByKey.delete(key);
@@ -83,6 +90,7 @@ export function createSessionState() {
     sessionTriggerByKey,
     terminatedSessions,
     callCounters,
+    macroReviewThresholds,
     lastActivityMs,
     touchActivity,
     isCronTrigger,

@@ -5,6 +5,18 @@ export interface AnalysisConfig {
   baseUrl?: string;
 }
 
+export interface MacroReviewConfig {
+  // "fixed": review every `interval` calls, exactly (default). "random": draw
+  // a new interval from a triangular distribution (randomMin..randomMax,
+  // peaking at randomMode) after every review, so the cadence can't be timed
+  // around by whatever is driving the agent.
+  mode?: "fixed" | "random";
+  interval?: number;
+  randomMin?: number;
+  randomMax?: number;
+  randomMode?: number;
+}
+
 export interface DomainConfig {
   allow?: string[];
   deny?: string[];
@@ -19,6 +31,9 @@ export interface NancyConfig {
     token?: string;
   };
   domains?: DomainConfig;
+  // Cadence of the periodic behavioral review (macro-review, feature #9).
+  // Unset = fixed every 10 calls.
+  macroReview?: MacroReviewConfig;
   // Session key of the main/chat session. When set, that session is locked to
   // passive reads only (see the MAIN_ALLOWED_TOOLS/isMainGateAllowed default-deny
   // gate below) — real work must go through a confirmed task, which NanCy

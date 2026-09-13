@@ -15,7 +15,7 @@ Status: early-stage, unaudited, "research and development only" per README's own
 - `src/analysis/client.ts` — `callLlm()`, the one-shot analysis call (provider-agnostic: gemini/openai/anthropic/openai-compat).
 - `src/analysis/verdict.ts` — ALLOW/BLOCK/CLARIFY parsing.
 - `src/analysis/context.ts` — builds the Intent Anchoring prompt context (confirmed task, recent calls/reasoning, protected-files list).
-- `src/analysis/macro-review.ts` — the every-10-calls behavioral review (feature #9).
+- `src/analysis/macro-review.ts` — the periodic behavioral review (feature #9), every 10 calls by default; cadence is configurable (`macroReview` in `openclaw.plugin.json`) as fixed or randomized (triangular distribution) via `pickNextMacroReviewInterval()`.
 - `src/policy/domain-policy.ts` — `checkDomainBorder()` / URLhaus reputation / RDAP domain-age — Domain Border Control (feature #3).
 - `src/policy/operator-policy.ts` — built-in minimum policy plus fresh loading of the protected root `NANCY-POLICY.md` for every reviewer call.
 - `src/policy/protected-paths.ts` — resolves per-agent workspace/protected paths and `protectedWriteTarget()`. Protected and unconditionally blocked for `write`/`edit`: `AGENTS.md`, `IDENTITY.md`, `MEMORY.md`, the whole `nancy/src/` directory (not just `index.ts` — NanCy's logic is split across all of it), `openclaw.plugin.json`, anything under `tasks/`.

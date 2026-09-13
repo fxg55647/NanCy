@@ -74,6 +74,34 @@
           }
         }
       },
+      "macroReview": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Cadence of the periodic behavioral review (macro-review) that looks at a session's recent call history as a whole, in tool calls per session.",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": ["fixed", "random"],
+            "description": "fixed: review every `interval` calls, exactly. random: draw a new interval (triangular distribution over randomMin..randomMax, peaking at randomMode) after every review, so the cadence can't be inferred or timed around. Default fixed."
+          },
+          "interval": {
+            "type": "number",
+            "description": "Calls between reviews in fixed mode. Default 10."
+          },
+          "randomMin": {
+            "type": "number",
+            "description": "Smallest possible interval in random mode. Default 1."
+          },
+          "randomMax": {
+            "type": "number",
+            "description": "Largest possible interval in random mode. Default 20."
+          },
+          "randomMode": {
+            "type": "number",
+            "description": "Most likely interval in random mode — the distribution peaks here and tapers toward randomMin/randomMax. Default 10."
+          }
+        }
+      },
       "mainSessionKey": {
         "type": "string",
         "description": "Session key of the main/chat session. When set, that session is locked to passive reads only — state-changing tools are blocked outright and must go through a confirmed task instead, which NanCy spawns as an isolated worker session (see workerAgentId). If unset, the main/worker split is disabled and every session is treated the same way."

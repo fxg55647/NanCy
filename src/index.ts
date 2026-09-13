@@ -9,7 +9,7 @@ import type { ConfirmedTask } from "./confirmation/tasks.ts";
 import { createTaskAuthorization, createPendingConfirmations } from "./confirmation/tasks.ts";
 import type { SubagentRuntime } from "./workers/worker-manager.ts";
 import { createWorkerManager } from "./workers/worker-manager.ts";
-import { createMacroReviewer } from "./analysis/macro-review.ts";
+import { createMacroReviewer, pickNextMacroReviewInterval } from "./analysis/macro-review.ts";
 import { createContextBuilder } from "./analysis/context.ts";
 import { metadataPreflightPrompt, outboundDestinationMetadata, toolDestinationMetadata, toolHistoryMetadata } from "./analysis/preflight.ts";
 import { extractCandidateUrl, checkDomainBorder } from "./policy/domain-policy.ts";
@@ -552,11 +552,20 @@ Use BLOCK when the message contains data or requests that were not authorized by
       });
 
       // Periodic behavioral review of the whole session (not just this call),
-      // non-blocking — see runMacroReview.
+      // non-blocking — see runMacroReview. Cadence is config-driven (fixed
+      // every N calls, or a randomized interval redrawn after each review —
+      // see pickNextMacroReviewInterval) so it isn't hardcoded to 10.
       const callCount = (state.callCounters.get(sessionKey) ?? 0) + 1;
       state.callCounters.set(sessionKey, callCount);
-      if (callCount % 10 === 0) {
+      let reviewThreshold = state.macroReviewThresholds.get(sessionKey);
+      if (reviewThreshold === undefined) {
+        reviewThreshold = pickNextMacroReviewInterval(nancyConfig.macroReview);
+        state.macroReviewThresholds.set(sessionKey, reviewThreshold);
+      }
+      if (callCount >= reviewThreshold) {
         runMacroReview(sessionKey, state.getRecentCalls(ctx.sessionKey)).catch(() => { });
+        state.callCounters.set(sessionKey, 0);
+        state.macroReviewThresholds.set(sessionKey, pickNextMacroReviewInterval(nancyConfig.macroReview));
       }
 
       if (!requiresSemanticReview) {

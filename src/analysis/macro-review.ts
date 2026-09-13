@@ -1,8 +1,31 @@
 import { appendFileSync } from "fs";
 import { callLlm } from "./client.ts";
-import type { NancyConfig } from "../config.ts";
+import type { MacroReviewConfig, NancyConfig } from "../config.ts";
 import type { TelegramNotifier } from "../notifications/telegram.ts";
 import type { SessionState } from "../state.ts";
+
+// Picks how many calls until the next macro-review. Fixed mode (default)
+// always returns `interval` (default 10) — predictable, easy to reason about
+// in logs. Random mode draws from a triangular distribution over
+// [randomMin, randomMax] peaking at randomMode, so the cadence a single
+// review is due can't be inferred or timed around, while still landing on
+// the configured "typical" value most of the time.
+export function pickNextMacroReviewInterval(cfg?: MacroReviewConfig): number {
+  if ((cfg?.mode ?? "fixed") !== "random") {
+    return Math.max(1, Math.round(cfg?.interval ?? 10));
+  }
+  const min = Math.max(1, cfg?.randomMin ?? 1);
+  const max = Math.max(min, cfg?.randomMax ?? 20);
+  const peak = Math.min(Math.max(cfg?.randomMode ?? 10, min), max);
+  if (max === min) return min;
+  const u = Math.random();
+  const c = (peak - min) / (max - min);
+  const sample =
+    u < c
+      ? min + Math.sqrt(u * (max - min) * (peak - min))
+      : max - Math.sqrt((1 - u) * (max - min) * (max - peak));
+  return Math.min(max, Math.max(min, Math.round(sample)));
+}
 
 export interface MacroReviewDeps {
   nancyConfig: NancyConfig;
