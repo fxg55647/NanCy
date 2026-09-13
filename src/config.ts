@@ -15,6 +15,15 @@ export interface MacroReviewConfig {
   randomMin?: number;
   randomMax?: number;
   randomMode?: number;
+  // Consecutive counted security denials that request an early behavioral
+  // review. Default 3.
+  blockBurstThreshold?: number;
+}
+
+export interface LimitsConfig {
+  // Counted security denials in one session during this gateway runtime
+  // before trusted code terminates that session. Default 20.
+  hardTerminateThreshold?: number;
 }
 
 export interface DomainConfig {
@@ -34,6 +43,8 @@ export interface NancyConfig {
   // Cadence of the periodic behavioral review (macro-review, feature #9).
   // Unset = fixed every 10 calls.
   macroReview?: MacroReviewConfig;
+  // Deterministic limits enforced without asking the reviewer model.
+  limits?: LimitsConfig;
   // Session key of the main/chat session. When set, that session is locked to
   // passive reads only (see the MAIN_ALLOWED_TOOLS/isMainGateAllowed default-deny
   // gate below) — real work must go through a confirmed task, which NanCy

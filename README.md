@@ -54,7 +54,7 @@ OpenClaw already provides security controls such as sandboxing, tool policies, a
 | **Browser destination context** | Before browser interaction, the reviewer receives a text snapshot of the current page. For fields that carry a value, NanCy first checks the destination without exposing that value to the reviewer prompt. |
 | **Passive main and scheduled sessions** *(optional for main)* | With `mainSessionKey` configured, the main chat is limited to passive operations. Cron-triggered runs receive the same default-deny gate automatically, so unattended schedules cannot start consequential work directly. |
 | **Disposable execution workers** *(optional)* | Each confirmed task can run in a dedicated worker session that is deleted after completion or timeout, reducing context carry-over between tasks. The main session can also be reset after an idle period. |
-| **Review of behavior over time** | In addition to per-action checks, NanCy periodically reviews recent calls for loops, gradual privilege escalation, repeated blocked attempts, and attempts to bypass supervision. A sustained violation can terminate the session. |
+| **Review of behavior over time** | In addition to per-action checks, NanCy periodically reviews recent calls for loops, gradual privilege escalation, repeated blocked attempts, and attempts to bypass supervision. Three counted security denials trigger an early review by default, while 20 terminate the session in trusted code even if the reviewer misses the pattern. |
 | **Security audit trail and alerts** | Tool, message, and confirmation decisions are written to correlated logs. Configured Telegram notifications surface startup warnings, blocks, suspicious behavioral patterns, and session termination. |
 
 These safeguards are defense in depth, not a claim that an OpenClaw deployment becomes safe by installing the plugin. Some checks are probabilistic, some protections are optional, outbound-message analysis currently fails open if its reviewer call fails, and the reviewer has no dedicated prompt-injection defense yet. The detailed behavior and limitations are documented below.
@@ -107,7 +107,11 @@ When `mainSessionKey` is configured, that session is locked to passive reads —
 
 ### 8. Behavioral Review & Session Termination ✅
 
-By default every 10 tool calls (configurable via `macroReview` — fixed interval, or a randomized one redrawn after each review so the cadence can't be timed around), NanCy runs a separate, session-level review over the recent call history — looking for *patterns* a single-call verdict can't see: loops, slow privilege escalation, repeated blocked attempts, a sustained attempt to bypass NanCy's own checks. This is additional to, not a replacement for, the per-call ALLOW/BLOCK/CLARIFY checks in feature #1. Only this behavioral review can terminate a session outright (`terminate` verdict) — once terminated, every subsequent tool call in that session is blocked unconditionally, regardless of what it is.
+By default every 10 tool calls (configurable via `macroReview` — fixed interval, or a randomized one redrawn after each review so the cadence can't be timed around), NanCy runs a separate, session-level review over the recent call history — looking for *patterns* a single-call verdict can't see: loops, slow privilege escalation, repeated blocked attempts, a sustained attempt to bypass NanCy's own checks. Three counted security denials in a burst request an early review by default. Reviews are serialized per session; requests arriving during a review are coalesced into one follow-up review over the latest bounded history.
+
+The reviewer may terminate a session when it sees a clear sustained violation. Independently, trusted code terminates a session after 20 counted security denials by default, so an always-`ok` macro-review cannot permit unlimited retries. Both later tool calls and outbound messages from a terminated session are blocked before content review. The counter is currently scoped to the running gateway process and clears on session end or restart; configure the threshold with `limits.hardTerminateThreshold` and the burst trigger with `macroReview.blockBurstThreshold`.
+
+An opt-in workflow for ending a worker and requesting clarification is still only a design. See [denial escalation and clarification](./docs/architecture/denial-escalation-and-clarification.md) for its state model, safety requirements, and rollout conditions.
 
 ### 9. Permanent Operator Policy ✅
 
@@ -222,6 +226,17 @@ Add the plugin path to the `plugins.load.paths` array and enable it under `plugi
 
 `analysis` is entirely separate from whatever model runs the main OpenClaw agent — set here in `plugins.entries.nancy.config`, and never read from the agent's own model config. Use a different model, preferably from a different model family or provider, for NanCy and the main agent. This reduces correlated blind spots and makes it less likely that the same prompt injection works against both models, although it does not make the reviewer immune to prompt injection. The [AI-control literature](./RELATED-WORK.md) likewise recommends an independent reviewer. At startup NanCy makes a best-effort check (string comparison, not authoritative — model-ref naming isn't standardized) and logs a warning if `analysis.model` appears to match the main agent's configured model.
 
+#### Denial escalation (optional tuning)
+
+The defaults terminate one session after 20 counted security denials and request an early macro-review after a burst of three. Test-mode blocks, infrastructure failures, exhausted info-lookup quotas, and attempts made after termination do not increase these counters.
+
+```json
+"limits": { "hardTerminateThreshold": 20 },
+"macroReview": { "blockBurstThreshold": 3 }
+```
+
+These counters currently live only for the gateway runtime. See [denial escalation and clarification](./docs/architecture/denial-escalation-and-clarification.md) for the exact classification and the planned durable-state work.
+
 #### Domain Border Control (optional)
 
 Add a `domains` block next to `analysis` to allow/deny specific domains for `web_fetch` and browser navigation. With no `domains` config at all, NanCy still checks every target domain against URLhaus's free reputation database (see [feature #3](#3-domain-border-control-)):
@@ -268,6 +283,8 @@ Set `allowUnconfirmedInfoLookups` to `false` to require a confirmed task for `we
 #### Only one interactive step: the initial confirmation
 
 NanCy asks for exactly one interactive decision per task — the confirmation in step 3 below. Everything after that is autonomous: CLARIFY verdicts during execution (feature #1) block outright rather than pausing to ask again, because native pause-for-approval delivery isn't available on every channel (Telegram in particular has no native plugin-approval surface at all, so a pause there fails outright instead of actually reaching anyone — not something NanCy can fix from config). If NanCy can't verify an action, it fails closed and the agent explains what happened and why in its own next reply, instead of the operator seeing a stream of low-level block errors.
+
+An optional clarification workflow is documented as a future design in [denial escalation and clarification](./docs/architecture/denial-escalation-and-clarification.md). Until that design's continuation-correlation and duplicate-side-effect requirements are implemented, the one-interactive-step behavior above remains authoritative.
 
 ### 3. Add task confirmation rules to your agent
 

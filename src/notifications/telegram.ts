@@ -63,6 +63,14 @@ export function createTelegramNotifier(api: OpenClawPluginApi, nancyConfig: Nanc
     sendAlert(`🛑 *NanCy blocked an action*\n${text}`);
   }
 
+  // Hard termination is rare and must not disappear behind the ordinary
+  // per-block debounce window. The denial recorder ensures this is called
+  // only on the transition into the terminated state.
+  function notifyHardTermination(text: string): void {
+    if (!alertsEnabled) return;
+    sendAlert(`⛔ *NanCy terminated a session*\n${text}`);
+  }
+
   function clearSessionBlockAlerts(sessionKey: string): void {
     const prefix = `${sessionKey}:`;
     for (const alertKey of recentBlockAlerts.keys()) {
@@ -70,7 +78,7 @@ export function createTelegramNotifier(api: OpenClawPluginApi, nancyConfig: Nanc
     }
   }
 
-  return { alertsEnabled, taskReportsEnabled, sendAlert, notifyBlocked, clearSessionBlockAlerts };
+  return { alertsEnabled, taskReportsEnabled, sendAlert, notifyBlocked, notifyHardTermination, clearSessionBlockAlerts };
 }
 
 export type TelegramNotifier = ReturnType<typeof createTelegramNotifier>;

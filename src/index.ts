@@ -23,6 +23,7 @@ import {
   PATH_WRITE_TOOLS, shouldAnalyze, isMainGateAllowed, browserAction, browserActKind,
   BROWSER_VALUE_ACT_KINDS, WEB_SNAPSHOT_TOOLS, UNCONFIRMED_INFO_LOOKUP_TOOLS,
 } from "./policy/tool-policy.ts";
+import { createDenialRecorder } from "./policy/denial-policy.ts";
 import { createSessionState, UNKNOWN_SESSION_KEY } from "./state.ts";
 import { createOperatorPolicy } from "./policy/operator-policy.ts";
 
@@ -81,6 +82,16 @@ export default definePluginEntry({
     // Periodic behavioral review of a session's recent call history (see
     // analysis/macro-review.ts).
     const { runMacroReview } = createMacroReviewer({ nancyConfig, analysisLog, logFile, state, notifier, getPolicyContext });
+
+    // One normalized path for deterministic denial counting and burst review
+    // requests. Detailed per-decision events are still written at each gate.
+    const { recordDenial } = createDenialRecorder({
+      nancyConfig,
+      logFile,
+      state,
+      notifier,
+      requestMacroReview: (sessionKey) => { runMacroReview(sessionKey).catch(() => { }); },
+    });
 
     // Intent-alignment prompt context builder (see analysis/context.ts).
     const { buildAnalysisContext } = createContextBuilder({ taskAuth, state, getPolicyContext });
@@ -190,6 +201,16 @@ export default definePluginEntry({
       // pick it up automatically once/if that changes upstream.
       const logIds: LogIds = { sessionKey: ctx.sessionKey, runId: ctx.runId, taskId: getCurrentTask(ctx.sessionKey)?.id };
 
+      // A stopped session must not retain a message-only escape hatch. Check
+      // this before parsing or reviewing the body, including confirmation-like
+      // text authored by the stopped session.
+      const messageSessionKey = ctx.sessionKey ?? UNKNOWN_SESSION_KEY;
+      if (state.terminatedSessions.get(messageSessionKey)) {
+        const reason = "NanCy SSIL: this session has been terminated due to a sustained security violation. No further outbound messages are permitted.";
+        recordDenial(messageSessionKey, { reasonCode: "message_blocked_terminated", securitySignal: false, ts, ids: logIds });
+        return { cancel: true, cancelReason: reason };
+      }
+
       const isReasoning = content.startsWith("Reasoning:");
       if (isReasoning) {
         const reasoningText = content.slice("Reasoning:".length).trim();
@@ -246,6 +267,7 @@ export default definePluginEntry({
       if (state.isCronTrigger(ctx.sessionKey)) {
         const reason = "NanCy blocks outbound messages from cron-triggered runs. Create a confirmed task first.";
         logDecision(logFile, ts, "message_blocked_cron", logIds, { channel: ctx.channelId ?? "unknown", to: event.to });
+        recordDenial(messageSessionKey, { reasonCode: "message_blocked_cron", securitySignal: true, ts, ids: logIds });
         return { cancel: true, cancelReason: reason };
       }
 
@@ -256,6 +278,7 @@ export default definePluginEntry({
       if (workerPrefix && ctx.sessionKey?.startsWith(workerPrefix) && !getCurrentTask(ctx.sessionKey)) {
         const reason = "NanCy blocks outbound messages from a worker with no active confirmed task.";
         logDecision(logFile, ts, "message_blocked_no_confirmed_task", logIds, { channel: ctx.channelId ?? "unknown", to: event.to });
+        recordDenial(messageSessionKey, { reasonCode: "message_blocked_no_confirmed_task", securitySignal: true, ts, ids: logIds });
         return { cancel: true, cancelReason: reason };
       }
 
@@ -272,6 +295,7 @@ export default definePluginEntry({
           // get an exception to that.
           console.warn(`[nancy] 🧪 TEST MODE — outbound message to ${event.to} would go out unanalyzed (analysis not configured); dry-run only, not actually sent.`);
           logDecision(logFile, ts, "test_mode_would_send_message", logIds, { channel: ctx.channelId ?? "unknown", to: event.to, reason: "analysis not configured" });
+          recordDenial(messageSessionKey, { reasonCode: "test_mode_would_send_message", securitySignal: false, ts, ids: logIds });
           return { cancel: true, cancelReason: "[TEST MODE] Outbound message blocked for dry-run: security analysis is not configured, so NanCy cannot verify it. No message is ever actually sent in test mode." };
         }
         // message_sending has no requireApproval-style pause available (unlike
@@ -300,6 +324,7 @@ export default definePluginEntry({
             const reason = preflightReason || "NanCy blocked this message: its destination is outside the confirmed task.";
             logDecision(logFile, ts, "message_blocked_destination", logIds, { channel: ctx.channelId ?? "unknown", to: event.to, reason });
             notifier.notifyBlocked(`Outbound message to ${event.to} via ${ctx.channelId ?? "unknown"}: ${reason}`, `${ctx.sessionKey ?? "unknown"}:message-destination:${ctx.channelId ?? "unknown"}`);
+            recordDenial(messageSessionKey, { reasonCode: "message_blocked_destination", securitySignal: true, ts, ids: logIds });
             return { cancel: true, cancelReason: reason };
           }
         } catch (err) {
@@ -329,6 +354,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
           console.warn(`[nancy] 🛑 BLOCKED outbound message (${verdict}): ${reason}`);
           logDecision(logFile, ts, "message_blocked", logIds, { verdict, channel: ctx.channelId ?? "unknown", to: event.to, reason });
           notifier.notifyBlocked(`Outbound message to ${event.to} via ${ctx.channelId ?? "unknown"}: ${reason}`, `${ctx.sessionKey ?? "unknown"}:message:${ctx.channelId ?? "unknown"}`);
+          recordDenial(messageSessionKey, { reasonCode: verdict === "clarify" ? "message_blocked_clarify" : "message_blocked", securitySignal: true, ts, ids: logIds });
           return { cancel: true, cancelReason: reason || "NanCy blocked this message: it did not match the confirmed task." };
         }
 
@@ -336,6 +362,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
           const testReason = `[TEST MODE] NanCy would have ALLOWED this outbound message in production: ${reason || "matches the confirmed task."} No message is ever actually sent in test mode.`;
           console.warn(`[nancy] 🧪 TEST MODE — would ALLOW outbound message to ${event.to}: ${reason}`);
           logDecision(logFile, ts, "test_mode_would_send_message", logIds, { channel: ctx.channelId ?? "unknown", to: event.to, reason });
+          recordDenial(messageSessionKey, { reasonCode: "test_mode_would_send_message", securitySignal: false, ts, ids: logIds });
           return { cancel: true, cancelReason: testReason };
         }
         // verdict === "allow" (and not testMode) — fall through and let it send
@@ -344,6 +371,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
         if (nancyConfig.testMode) {
           console.warn(`[nancy] 🧪 TEST MODE — outbound message analysis failed; dry-run blocks it instead of failing open: ${String(err)}`);
           logDecision(logFile, ts, "test_mode_would_send_message", logIds, { channel: ctx.channelId ?? "unknown", to: event.to, error: String(err) });
+          recordDenial(messageSessionKey, { reasonCode: "test_mode_message_analysis_error", securitySignal: false, ts, ids: logIds });
           return { cancel: true, cancelReason: `[TEST MODE] Outbound message blocked for dry-run: analysis failed (${String(err)}). No message is ever actually sent in test mode.` };
         }
         console.warn(`[nancy] ⚠️  outbound message analysis failed, allowing it through (fail-open, no approval path exists here): ${String(err)}`);
@@ -469,6 +497,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
       // Hard block, independent of LLM analysis: once a session is terminated
       // by runMacroReview's behavioral review, nothing it does is trusted again.
       if (state.terminatedSessions.get(sessionKey)) {
+        recordDenial(sessionKey, { reasonCode: "blocked_terminated", securitySignal: false, ts, ids: logIds });
         return { block: true, blockReason: "NanCy SSIL: this session has been terminated due to a sustained security violation. No further actions are permitted." };
       }
 
@@ -489,6 +518,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
         if (!protectedLabel.startsWith("tasks/")) {
           notifier.notifyBlocked(`${event.toolName}: ${reason}`, `${sessionKey}:protected:${event.toolName}`);
         }
+        recordDenial(sessionKey, { reasonCode: "blocked_protected_write", securitySignal: !protectedLabel.startsWith("tasks/"), ts, ids: logIds });
         return { block: true, blockReason: reason };
       }
 
@@ -519,6 +549,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
             : `'${event.toolName}' is not on NanCy's allow-list for the main session. Create a confirmed task first.`;
           console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: ${reason}`);
           logDecision(logFile, ts, "blocked_main_session", logIds, { toolName: event.toolName, reason, trigger: cronRun ? "cron" : undefined });
+          recordDenial(sessionKey, { reasonCode: cronRun ? "blocked_cron_session" : "blocked_main_session", securitySignal: true, ts, ids: logIds });
           return { block: true, blockReason: reason };
         }
       }
@@ -543,6 +574,9 @@ Use BLOCK when the message contains data or requests that were not authorized by
           console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: no active confirmed task`);
           logDecision(logFile, ts, "blocked_no_confirmed_task", logIds, { toolName: event.toolName });
           notifier.notifyBlocked(reason, `${sessionKey}:no-task:${event.toolName}`);
+          const workerSessionPrefix = nancyConfig.workerAgentId ? `agent:${nancyConfig.workerAgentId}:task-` : null;
+          const isWorkerWithoutTask = !!workerSessionPrefix && !!ctx.sessionKey?.startsWith(workerSessionPrefix);
+          recordDenial(sessionKey, { reasonCode: isWorkerWithoutTask ? "worker_no_task_reject" : "blocked_no_confirmed_task", securitySignal: isWorkerWithoutTask, ts, ids: logIds });
           return { block: true, blockReason: reason };
         }
         const limit = nancyConfig.unconfirmedInfoLookupLimitPerHour ?? 10;
@@ -552,6 +586,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
           console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: unconfirmed-info-lookup rate limit reached (${limit}/hour)`);
           logDecision(logFile, ts, "blocked_info_lookup_rate_limit", logIds, { toolName: event.toolName, limit });
           notifier.notifyBlocked(reason, `${sessionKey}:info-lookup-limit:${event.toolName}`);
+          recordDenial(sessionKey, { reasonCode: "blocked_info_lookup_rate_limit", securitySignal: false, ts, ids: logIds });
           return { block: true, blockReason: reason };
         }
         effectiveTask = buildUnconfirmedInfoLookupTask();
@@ -569,6 +604,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
           console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: ${domainBlockReason}`);
           logDecision(logFile, ts, "domain_blocked", logIds, { toolName: event.toolName, url: candidateUrl, reason: domainBlockReason });
           notifier.notifyBlocked(`${event.toolName}: ${domainBlockReason}`, `${sessionKey}:domain:${event.toolName}`);
+          recordDenial(sessionKey, { reasonCode: "domain_blocked", securitySignal: true, ts, ids: logIds });
           return { block: true, blockReason: domainBlockReason };
         }
       }
@@ -595,7 +631,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
         state.macroReviewThresholds.set(sessionKey, reviewThreshold);
       }
       if (callCount >= reviewThreshold) {
-        runMacroReview(sessionKey, state.getRecentCalls(ctx.sessionKey)).catch(() => { });
+        runMacroReview(sessionKey).catch(() => { });
         state.callCounters.set(sessionKey, 0);
         state.macroReviewThresholds.set(sessionKey, pickNextMacroReviewInterval(nancyConfig.macroReview));
       }
@@ -605,6 +641,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
           const reason = `[TEST MODE] '${event.toolName}' never requires analysis (always considered safe) and would have gone through. In test mode, no tool call is ever actually executed.`;
           console.warn(`[nancy] 🧪 TEST MODE — would ALLOW ${event.toolName} without analysis (never required it)`);
           logDecision(logFile, ts, "test_mode_would_allow", logIds, { toolName: event.toolName, analyzed: false });
+          recordDenial(sessionKey, { reasonCode: "test_mode_would_allow", securitySignal: false, ts, ids: logIds });
           return { block: true, blockReason: reason };
         }
         return;
@@ -623,6 +660,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
         console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: analysis not configured`);
         logDecision(logFile, ts, "blocked_no_analysis", logIds, { toolName: event.toolName });
         notifier.notifyBlocked(reason, `${sessionKey}:no-analysis:${event.toolName}`);
+        recordDenial(sessionKey, { reasonCode: "blocked_no_analysis", securitySignal: false, ts, ids: logIds });
         return { block: true, blockReason: reason };
       }
 
@@ -646,6 +684,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
             const reason = preflightReason || `NanCy blocked ${event.toolName}: its destination is outside the confirmed task.`;
             logDecision(logFile, ts, "blocked_destination", logIds, { toolName: event.toolName, metadata: destinationMetadata, reason });
             notifier.notifyBlocked(`${event.toolName}: ${reason}`, `${sessionKey}:destination:${event.toolName}`);
+            recordDenial(sessionKey, { reasonCode: "blocked_destination", securitySignal: true, ts, ids: logIds });
             return { block: true, blockReason: reason };
           }
         } catch (err) {
@@ -690,6 +729,7 @@ Use BLOCK when this page or form clearly does not belong to the confirmed task (
               console.warn(`[nancy] 🛑 BLOCKED ${event.toolName} (context check, before reading the value): ${contextReason}`);
               logDecision(logFile, ts, "blocked_context", logIds, { toolName: event.toolName, reason: contextReason });
               notifier.notifyBlocked(`${event.toolName}: wrong page/form context, blocked before reading the value — ${contextReason}`, `${sessionKey}:context:${event.toolName}`);
+              recordDenial(sessionKey, { reasonCode: "blocked_context", securitySignal: true, ts, ids: logIds });
               return { block: true, blockReason: contextReason || "NanCy blocked this action: the page/form context did not match the confirmed task." };
             }
             if (contextVerdict === "clarify") {
@@ -700,6 +740,7 @@ Use BLOCK when this page or form clearly does not belong to the confirmed task (
               console.warn(`[nancy] 🛑 BLOCKED ${event.toolName} (context check, unclear): ${contextReason}`);
               logDecision(logFile, ts, "blocked_context_clarify", logIds, { toolName: event.toolName, reason: contextReason });
               notifier.notifyBlocked(`${event.toolName}: unclear page/form context — ${contextReason}`, `${sessionKey}:context:${event.toolName}`);
+              recordDenial(sessionKey, { reasonCode: "blocked_context_clarify", securitySignal: true, ts, ids: logIds });
               return { block: true, blockReason: contextReason || "NanCy blocked this action: the page/form context does not clearly match the confirmed task." };
             }
             // contextVerdict === "allow" — fall through to the full, value-included check below
@@ -709,6 +750,7 @@ Use BLOCK when this page or form clearly does not belong to the confirmed task (
             console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: context analysis failed, blocking as precaution: ${String(err)}`);
             logDecision(logFile, ts, "blocked_context_error", logIds, { toolName: event.toolName, error: String(err) });
             notifier.notifyBlocked(reason, `${sessionKey}:context-error:${event.toolName}`);
+            recordDenial(sessionKey, { reasonCode: "blocked_context_error", securitySignal: false, ts, ids: logIds });
             return { block: true, blockReason: reason };
           }
         }
@@ -733,6 +775,7 @@ Use BLOCK when the action clearly contradicts or exceeds the confirmed task, loo
           console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: ${reason}`);
           logDecision(logFile, ts, "blocked", logIds, { toolName: event.toolName, reason });
           notifier.notifyBlocked(`${event.toolName}: ${reason}`, `${sessionKey}:blocked:${event.toolName}`);
+          recordDenial(sessionKey, { reasonCode: "blocked", securitySignal: true, ts, ids: logIds });
           return { block: true, blockReason: reason || "NanCy blocked this action: it did not match the confirmed task." };
         }
 
@@ -744,12 +787,14 @@ Use BLOCK when the action clearly contradicts or exceeds the confirmed task, loo
           console.warn(`[nancy] 🛑 BLOCKED ${event.toolName} (unclear): ${reason}`);
           logDecision(logFile, ts, "blocked_clarify", logIds, { toolName: event.toolName, reason });
           notifier.notifyBlocked(`${event.toolName}: ${reason}`, `${sessionKey}:clarify:${event.toolName}`);
+          recordDenial(sessionKey, { reasonCode: "blocked_clarify", securitySignal: true, ts, ids: logIds });
           return { block: true, blockReason: reason || "NanCy blocked this action: it does not clearly match the confirmed task." };
         }
         if (verdict === "allow" && nancyConfig.testMode) {
           const testReason = `[TEST MODE] NanCy would have ALLOWED this in production: ${reason || "matches the confirmed task."} Execution stopped because testMode is enabled — no tool call ever actually goes through in test mode.`;
           console.warn(`[nancy] 🧪 TEST MODE — would ALLOW ${event.toolName}: ${reason}`);
           logDecision(logFile, ts, "test_mode_would_allow", logIds, { toolName: event.toolName, analyzed: true, reason });
+          recordDenial(sessionKey, { reasonCode: "test_mode_would_allow", securitySignal: false, ts, ids: logIds });
           return { block: true, blockReason: testReason };
         }
         // verdict === "allow" (and not testMode) — fall through and let the call proceed
@@ -759,6 +804,7 @@ Use BLOCK when the action clearly contradicts or exceeds the confirmed task, loo
         console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: analysis failed, blocking as precaution: ${String(err)}`);
         logDecision(logFile, ts, "blocked_analysis_error", logIds, { toolName: event.toolName, error: String(err) });
         notifier.notifyBlocked(reason, `${sessionKey}:analysis-error:${event.toolName}`);
+        recordDenial(sessionKey, { reasonCode: "blocked_analysis_error", securitySignal: false, ts, ids: logIds });
         return { block: true, blockReason: reason };
       }
     });

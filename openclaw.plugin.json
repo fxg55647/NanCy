@@ -99,6 +99,23 @@
           "randomMode": {
             "type": "number",
             "description": "Most likely interval in random mode — the distribution peaks here and tapers toward randomMin/randomMax. Default 10."
+          },
+          "blockBurstThreshold": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Counted security denials in a burst that request an early macro-review. Default 3."
+          }
+        }
+      },
+      "limits": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Deterministic runtime limits enforced without relying on an LLM verdict.",
+        "properties": {
+          "hardTerminateThreshold": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Counted security denials in one session during this gateway runtime before NanCy terminates that session. Default 20."
           }
         }
       },

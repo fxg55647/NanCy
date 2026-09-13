@@ -4,7 +4,7 @@ OpenClaw plugin. Logic is split across modules under `src/` (see the module map 
 
 ## What this is
 
-NanCy is a security guard plugin for the **OpenClaw** autonomous agent runtime (not for Claude Code itself — this repo *builds* NanCy, it doesn't run under it). It intercepts OpenClaw's tool calls and outbound messages, runs a one-shot LLM judgment against a user-confirmed task, and blocks/allows/clarifies based on the verdict. Core idea: "the agent only asks, NanCy decides" — the agent cannot write its own confirmation, NanCy's code is the sole writer of `tasks/current.json`.
+NanCy is a security guard plugin for the **OpenClaw** autonomous agent runtime (not for Claude Code itself — this repo *builds* NanCy, it doesn't run under it). It intercepts OpenClaw's tool calls and outbound messages, runs a one-shot LLM judgment against a user-confirmed task, and blocks/allows/clarifies based on the verdict. Core idea: "the agent only asks, NanCy decides" — the agent cannot write its own confirmation; NanCy writes per-task audit records and grants authorization in memory to the exact worker session it creates.
 
 Status: early-stage, unaudited, "research and development only" per README's own warning banner. Not for production safety yet.
 
@@ -20,18 +20,19 @@ Status: early-stage, unaudited, "research and development only" per README's own
 - `src/policy/operator-policy.ts` — built-in minimum policy plus fresh loading of the protected root `NANCY-POLICY.md` for every reviewer call.
 - `src/policy/protected-paths.ts` — resolves per-agent workspace/protected paths and `protectedWriteTarget()`. Protected and unconditionally blocked for `write`/`edit`: `AGENTS.md`, `IDENTITY.md`, `MEMORY.md`, the whole `nancy/src/` directory (not just `index.ts` — NanCy's logic is split across all of it), `openclaw.plugin.json`, anything under `tasks/`.
 - `src/policy/tool-policy.ts` — main/cron default-deny allowlist, browser action classification, `shouldAnalyze()`.
+- `src/policy/denial-policy.ts` — normalized denial classification, runtime-scoped total/burst counters, deterministic termination, and burst-review triggering.
 - `src/confirmation/protocol.ts` — `parseConfirmationRequest()` / `isAffirmativeReply()` — intent confirmation flow (feature #2).
 - `src/confirmation/tasks.ts` — per-session confirmed-task authorization and pending-confirmation state.
 - `src/workers/worker-manager.ts` — spawns/waits-for/cleans-up the isolated worker session per confirmed task.
 - `src/notifications/telegram.ts` — Telegram alerting/status pushes, block-alert debounce.
 - `src/browser/snapshot.ts` — `fetchBrowserSnapshot()` and snapshot file naming/pruning — DOM Biopsy (feature #5).
 - `src/logging/logger.ts` — `logDecision()`, log rotation.
-- `src/state.ts` — per-session state: recent call/reasoning ring buffers, cron-trigger correlation, call counters, termination flags.
-- Config schema lives in `openclaw.plugin.json` (`analysis`, `browser`, `domains`, `mainSessionKey`, `mainSessionIdleMinutes`, `workerAgentId`, `telegramAlerts`, `testMode`).
+- `src/state.ts` — per-session state: recent call/reasoning ring buffers, cron-trigger correlation, call/denial counters, macro-review serialization, termination flags.
+- Config schema lives in `openclaw.plugin.json` (`analysis`, `browser`, `domains`, `macroReview`, `limits`, `mainSessionKey`, `mainSessionIdleMinutes`, `workerAgentId`, `telegramAlerts`, `testMode`).
 
 ## Feature status (see README §"Key Technical Features" for full detail)
 
-✅ implemented: SSIL one-shot analysis (#1), intent confirmation (#2, gap-detection still 🧭), Domain Border Control (#3), main/worker session split (#7, optional), behavioral review + session termination every 10 calls (#8), permanent operator policy (#9), write-protection for core files (#6).
+✅ implemented: SSIL one-shot analysis (#1), intent confirmation (#2, gap-detection still 🧭), Domain Border Control (#3), main/worker session split (#7, optional), behavioral review plus deterministic denial termination (#8), permanent operator policy (#9), write-protection for core files (#6).
 
 🧭 not implemented: Contextual Scrambler / PIDD integration (#4).
 
@@ -55,5 +56,6 @@ Work has been on the operational/runtime side: cron-triggered runs now gated lik
 - `INCIDENTS.md` — sourced public incidents and scoped counterfactual analysis of where NanCy might help
 - `MISCONCEPTIONS.md` — objections/FAQ (collusion, agent talking to NanCy directly, AI-reviewer bias)
 - `RELATED-WORK.md` — positioning vs. LlamaFirewall AlignmentCheck, ClawGuard, Google ADK hooks
+- `docs/architecture/denial-escalation-and-clarification.md` — implemented denial ceiling/burst-review rules plus the not-yet-implemented ticketed clarification design; includes state transitions, release conditions, and tests
 - `TESTING.md` — how to test changes: `npm test` (mocked, fast) vs. a standalone harness against the real reviewer model (genuine verdicts, zero live-gateway risk), the confirmed-task file format, and why the live gateway must never be stopped/restarted for testing
 - `EVAL-RESULTS.md` — generated report from `scripts/run-eval.mts` (a fixed, hand-written scenario set in `scripts/eval-scenarios.json`, run against the real configured reviewer model via the Option B pattern). Regenerate with `node --experimental-strip-types scripts/run-eval.mts`; re-run whenever `analysis.model` or the policy/analysis modules change, to catch reviewer-behavior regressions.

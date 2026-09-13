@@ -28,6 +28,11 @@ export function createSessionState() {
 
   // Per-session state for the main/worker split and behavioral review.
   const terminatedSessions = new Map<string, boolean>();
+  // Deterministic runtime-scoped backstop for repeated security denials.
+  // These deliberately do not depend on an LLM verdict beyond the stable
+  // classification made at each denial site in index.ts.
+  const securityDenialsTotal = new Map<string, number>();
+  const securityDenialsBurst = new Map<string, number>();
   // Calls since the last macro-review for this session; reset to 0 each time
   // a review fires (see macroReviewThresholds below).
   const callCounters = new Map<string, number>();
@@ -35,6 +40,10 @@ export function createSessionState() {
   // (via pickNextMacroReviewInterval) whenever it's unset or just consumed —
   // fixed mode always redraws the same number, random mode doesn't.
   const macroReviewThresholds = new Map<string, number>();
+  // Serialize macro-reviews per session. A request arriving while one is in
+  // flight is coalesced into one follow-up review over the latest history.
+  const macroReviewInFlight = new Set<string>();
+  const macroReviewPending = new Set<string>();
   const lastActivityMs = new Map<string, number>();
   // Deterministic backstop for allowUnconfirmedInfoLookups (see config.ts),
   // independent of the reviewer's own judgment — fixed rolling window per
@@ -106,6 +115,10 @@ export function createSessionState() {
     callCounters.delete(key);
     macroReviewThresholds.delete(key);
     terminatedSessions.delete(key);
+    securityDenialsTotal.delete(key);
+    securityDenialsBurst.delete(key);
+    macroReviewInFlight.delete(key);
+    macroReviewPending.delete(key);
     lastActivityMs.delete(key);
     sessionTriggerByKey.delete(key);
     infoLookupWindowBySession.delete(key);
@@ -114,8 +127,12 @@ export function createSessionState() {
   return {
     sessionTriggerByKey,
     terminatedSessions,
+    securityDenialsTotal,
+    securityDenialsBurst,
     callCounters,
     macroReviewThresholds,
+    macroReviewInFlight,
+    macroReviewPending,
     lastActivityMs,
     touchActivity,
     isCronTrigger,
