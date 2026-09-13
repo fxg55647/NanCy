@@ -501,8 +501,19 @@ Use BLOCK when the message contains data or requests that were not authorized by
       // unattended scheduled run must not get free tool access just because its
       // sessionKey isn't mainSessionKey. See isCronTrigger/sessionTriggerByKey above.
       const cronRun = state.isCronTrigger(ctx.sessionKey);
+      // web_search/web_fetch are deliberately exempted from this hard block
+      // when allowUnconfirmedInfoLookups is on (default true): they still
+      // aren't "allowed" here in the sense of running unchecked — they fall
+      // through to the requiresSemanticReview/no-confirmed-task logic below,
+      // which for a main/cron session (never granted a task) always takes
+      // the same fallback-or-hard-block path as any other taskless session.
+      // Without this exemption, the main-gate check below returns before
+      // that logic is ever reached, so the fallback — whose whole point is
+      // letting a casual "what's the weather" chat question work in the
+      // main session without a task — could never actually fire there.
+      const infoLookupFallbackEligible = (nancyConfig.allowUnconfirmedInfoLookups ?? true) && UNCONFIRMED_INFO_LOOKUP_TOOLS.has(event.toolName);
       if (isMainSession(ctx.sessionKey) || cronRun) {
-        if (!isMainGateAllowed(event.toolName, event.params)) {
+        if (!isMainGateAllowed(event.toolName, event.params) && !infoLookupFallbackEligible) {
           const reason = cronRun
             ? `'${event.toolName}' is not on NanCy's allow-list for a cron-triggered run. Create a confirmed task first.`
             : `'${event.toolName}' is not on NanCy's allow-list for the main session. Create a confirmed task first.`;
@@ -527,8 +538,7 @@ Use BLOCK when the message contains data or requests that were not authorized by
       // with no confirmed task, unchanged.
       let effectiveTask = confirmedTask;
       if (requiresSemanticReview && !confirmedTask) {
-        const eligibleForFallback = (nancyConfig.allowUnconfirmedInfoLookups ?? true) && UNCONFIRMED_INFO_LOOKUP_TOOLS.has(event.toolName);
-        if (!eligibleForFallback) {
+        if (!infoLookupFallbackEligible) {
           const reason = `${event.toolName}: no active confirmed task authorizes this action.`;
           console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: no active confirmed task`);
           logDecision(logFile, ts, "blocked_no_confirmed_task", logIds, { toolName: event.toolName });

@@ -89,6 +89,65 @@ test("allowUnconfirmedInfoLookups: false restores the old strict behavior for we
   }
 });
 
+test("web_search from the main chat session reaches the fallback instead of being hard-blocked by the main-session gate", async () => {
+  // Regression test: isMainGateAllowed() never listed web_search/web_fetch
+  // as allowed for the main session (deliberately — they normally require a
+  // confirmed task), so before the fix, the main-session gate hard-blocked
+  // them with "Create a confirmed task first" before the fallback logic
+  // further down in before_tool_call was ever reached — defeating the whole
+  // point of the fallback, whose motivating use case (README feature #10)
+  // is exactly a casual "what's the weather" question in the main chat.
+  const { restore } = mockFetch(verdictResponse("ALLOW", "plain informational search"));
+  const { api, handlers, rootDir, cleanup } = createFakeApi({
+    pluginConfig: { analysis: analysisCfg, mainSessionKey: "main" },
+  });
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    nancyPlugin.register(api as any);
+    const result = await handlers.before_tool_call({ toolName: "web_search", params: { query: "weather in Kotka" } }, { sessionKey: "main" });
+    assert.equal(result, undefined, "the main session must reach the info-lookup fallback, not the main-gate hard block");
+    const log = readFileSync(join(rootDir, "nancy.log"), "utf8");
+    assert.ok(!log.includes('"blocked_main_session"'), "must not have taken the main-gate hard-block path at all");
+    assert.ok(log.includes('"unconfirmed_info_lookup_fallback"'), "must have gone through the fallback grant");
+  } finally {
+    restore();
+    cleanup();
+  }
+});
+
+test("the main-session gate still hard-blocks every other tool, even with the info-lookup fallback enabled", async () => {
+  const { api, handlers, cleanup } = createFakeApi({ pluginConfig: { analysis: analysisCfg, mainSessionKey: "main" } });
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    nancyPlugin.register(api as any);
+    const result = await handlers.before_tool_call({ toolName: "apply_patch", params: { patch: "x" } }, { sessionKey: "main" });
+    assert.equal(result?.block, true, "apply_patch must remain hard-blocked in the main session");
+    assert.match(result.blockReason, /allow-list for the main session/);
+  } finally {
+    cleanup();
+  }
+});
+
+test("unconfirmedInfoLookupLimitPerHour: 0 blocks even the very first lookup of a session (regression: used to always allow call #1)", async () => {
+  const { restore, callCount } = mockFetch(verdictResponse("ALLOW", "plain informational search"));
+  const { api, handlers, rootDir, cleanup } = createFakeApi({
+    pluginConfig: { analysis: analysisCfg, unconfirmedInfoLookupLimitPerHour: 0 },
+  });
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    nancyPlugin.register(api as any);
+    const result = await handlers.before_tool_call({ toolName: "web_search", params: { query: "q" } }, { sessionKey: "sess-zero-limit" });
+    assert.equal(result?.block, true, "a limit of 0 must refuse even the first call in a brand-new window");
+    assert.match(result.blockReason, /hourly limit/);
+    assert.equal(callCount(), 0, "the reviewer must never be called when the limit is 0");
+    const log = readFileSync(join(rootDir, "nancy.log"), "utf8");
+    assert.ok(log.includes('"blocked_info_lookup_rate_limit"'));
+  } finally {
+    restore();
+    cleanup();
+  }
+});
+
 test("the per-session hourly cap refuses the fallback once exhausted, independent of the reviewer's own verdict", async () => {
   const { restore, callCount } = mockFetch(verdictResponse("ALLOW", "plain informational search"));
   const { api, handlers, rootDir, cleanup } = createFakeApi({

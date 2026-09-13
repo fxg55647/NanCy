@@ -107,7 +107,7 @@ When `mainSessionKey` is configured, that session is locked to passive reads —
 
 ### 8. Behavioral Review & Session Termination ✅
 
-Every 10 tool calls, NanCy runs a separate, session-level review over the recent call history — looking for *patterns* a single-call verdict can't see: loops, slow privilege escalation, repeated blocked attempts, a sustained attempt to bypass NanCy's own checks. This is additional to, not a replacement for, the per-call ALLOW/BLOCK/CLARIFY checks in feature #1. Only this behavioral review can terminate a session outright (`terminate` verdict) — once terminated, every subsequent tool call in that session is blocked unconditionally, regardless of what it is.
+By default every 10 tool calls (configurable via `macroReview` — fixed interval, or a randomized one redrawn after each review so the cadence can't be timed around), NanCy runs a separate, session-level review over the recent call history — looking for *patterns* a single-call verdict can't see: loops, slow privilege escalation, repeated blocked attempts, a sustained attempt to bypass NanCy's own checks. This is additional to, not a replacement for, the per-call ALLOW/BLOCK/CLARIFY checks in feature #1. Only this behavioral review can terminate a session outright (`terminate` verdict) — once terminated, every subsequent tool call in that session is blocked unconditionally, regardless of what it is.
 
 ### 9. Permanent Operator Policy ✅
 

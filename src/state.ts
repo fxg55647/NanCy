@@ -49,10 +49,16 @@ export function createSessionState() {
   function consumeInfoLookupQuota(sessionKey: string | undefined, limit: number, windowMs: number): boolean {
     const key = sessionKey ?? UNKNOWN_SESSION_KEY;
     const now = Date.now();
-    const entry = infoLookupWindowBySession.get(key);
+    let entry = infoLookupWindowBySession.get(key);
+    // A fresh/expired window used to be seeded with count:1 and an
+    // unconditional `return true`, so limit:0 never actually took effect on
+    // the very first call of a new window — only a *second* call in the
+    // same window would see count (1) >= limit (0) and get refused. Seed at
+    // count:0 and let the single check below decide every call, including
+    // the first one in a brand-new window.
     if (!entry || now - entry.windowStart >= windowMs) {
-      infoLookupWindowBySession.set(key, { windowStart: now, count: 1 });
-      return true;
+      entry = { windowStart: now, count: 0 };
+      infoLookupWindowBySession.set(key, entry);
     }
     if (entry.count >= limit) return false;
     entry.count += 1;

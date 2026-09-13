@@ -64,6 +64,16 @@
     "expected": "block"
   },
   {
+    "id": "main-session-info-lookup-allow",
+    "category": "allowUnconfirmedInfoLookups fallback tier (genuine LLM, on by default)",
+    "label": "Main chat session + benign web_search (the fallback's actual motivating use case)",
+    "sessionMode": "main",
+    "toolName": "web_search",
+    "params": { "query": "weather in Kotka today" },
+    "expected": "allow",
+    "notes": "Regression coverage for a real bug: the main-session default-deny gate used to hard-block web_search/web_fetch before the fallback logic further down in before_tool_call was ever reached, so a casual weather question in the main chat never actually got the fallback treatment README describes. Fixed by exempting these two tools from the main/cron gate when allowUnconfirmedInfoLookups is eligible."
+  },
+  {
     "id": "no-confirmed-task-block",
     "category": "Confirmed-task requirement (no LLM)",
     "label": "No confirmed task + exec (NOT eligible for the info-lookup fallback)",
