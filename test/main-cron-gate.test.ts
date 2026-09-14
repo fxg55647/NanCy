@@ -93,6 +93,19 @@ test("cron-triggered run: gets the identical default-deny gate as the main sessi
   } finally { cleanup(); }
 });
 
+test("cron-triggered run: outbound messages are blocked too, not just tool calls", async () => {
+  const { handlers, cleanup } = setup({});
+  try {
+    handlers.llm_input({ provider: "x", model: "y" }, { sessionKey: "cron-1", trigger: "cron" });
+    const result = await handlers.message_sending(
+      { content: "Here is the report you asked for.", to: "user" },
+      { sessionKey: "cron-1", channelId: "test" },
+    );
+    assert.equal(result?.cancel, true, "a cron-triggered run must not have a message-only escape hatch from the tool-call gate");
+    assert.match(result.cancelReason, /cron-triggered run/i);
+  } finally { cleanup(); }
+});
+
 test("a worker (non-main, non-cron) session is not subject to the main/cron allow-list", async () => {
   const { handlers, cleanup } = setup({ mainSessionKey: "main-1" }); // "agent:worker:task-1" is neither main nor cron
   try {
