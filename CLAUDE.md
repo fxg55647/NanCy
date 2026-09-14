@@ -55,6 +55,7 @@ Work has been on the operational/runtime side: cron-triggered runs are gated lik
 - `SECURITY-PHILOSOPHY.md` — "limit the blast radius" deployment guidance
 - `NANCY-POLICY.md` — standing operator restrictions included in every security judgment
 - `INCIDENTS.md` — sourced public incidents and scoped counterfactual analysis of where NanCy might help
+- `HOW-AGENTS-GO-WRONG.md` — plain-language failure scenarios, the NanCy layers that may reduce each risk, and residual limitations
 - `MISCONCEPTIONS.md` — objections/FAQ (collusion, agent talking to NanCy directly, AI-reviewer bias)
 - `RELATED-WORK.md` — positioning vs. LlamaFirewall AlignmentCheck, ClawGuard, Google ADK hooks
 - `docs/architecture/denial-escalation-and-clarification.md` — implemented denial ceiling/burst-review rules plus the not-yet-implemented ticketed clarification design; includes state transitions, release conditions, and tests

@@ -8,6 +8,7 @@
 - [The Core Concept: Intent Anchoring & Stateless Verification](#the-core-concept-intent-anchoring--stateless-verification)
 - [What This Enables](#what-this-enables)
 - [What NanCy Adds to OpenClaw](#what-nancy-adds-to-openclaw)
+- [How Agents Go Wrong](#how-agents-go-wrong)
 - [Key Technical Features](#key-technical-features)
 - [The Philosophy: Assume Compromise & Pragmatic Safety](#the-philosophy-assume-compromise--pragmatic-safety)
 - [Security philosophy](#security-philosophy)
@@ -72,6 +73,10 @@ OpenClaw already provides security controls such as sandboxing, tool policies, a
 | **Security audit trail and alerts** | Tool, message, and confirmation decisions are written to correlated logs. Configured Telegram notifications surface startup warnings, blocks, suspicious behavioral patterns, and session termination. |
 
 These safeguards are defense in depth, not a claim that an OpenClaw deployment becomes safe by installing the plugin. Some checks are probabilistic, some protections are optional, and the reviewer has no dedicated prompt-injection defense yet. Required tool and outbound-message reviews fail closed if the reviewer call fails. The detailed behavior and limitations are documented below.
+
+## How Agents Go Wrong
+
+Agents can cause serious damage without becoming malicious. They may drift away from the task, obey instructions hidden in a website, misunderstand an ambiguous request, choose the wrong recipient, or combine harmless-looking steps into a dangerous chain. **[How AI Agents Go Wrong — and What NanCy Can Do](./HOW-AGENTS-GO-WRONG.md)** explains these scenarios in everyday language, which NanCy layers may reduce each risk, and what can still go wrong.
 
 
 ## Key Technical Features
