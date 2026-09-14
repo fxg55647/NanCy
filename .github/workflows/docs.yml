@@ -1,0 +1,45 @@
+name: Publish docs site
+
+# Builds NanCy's Markdown docs into a static HTML site (scripts/build-docs-site.mts)
+# and publishes it to the gh-pages branch, served by GitHub Pages. Same
+# build-then-push-to-gh-pages pattern fxg55647/leima uses for its own
+# status/audit pages, applied here to a whole multi-page docs site.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**.md"
+      - "scripts/build-docs-site.mts"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: docs-site
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-deploy:
+    if: github.repository == 'fxg55647/NanCy'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - run: npm ci
+
+      - name: Build docs site
+        run: node --experimental-strip-types scripts/build-docs-site.mts
+
+      - name: Publish to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./_site

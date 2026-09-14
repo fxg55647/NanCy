@@ -11,11 +11,17 @@
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test test/*.test.ts",
     "check": "npm run typecheck && npm test",
-    "eval": "node --experimental-strip-types scripts/run-eval.mts"
+    "eval": "node --experimental-strip-types scripts/run-eval.mts",
+    "verify:arweave": "node --experimental-strip-types scripts/verify-arweave-anchor.mts"
   },
   "devDependencies": {
     "@types/node": "^22.20.2",
+    "github-slugger": "^2.0.0",
+    "marked": "^18.0.13",
     "openclaw": "^2026.9.4",
     "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "arweave": "^2.1.0"
   }
 }
