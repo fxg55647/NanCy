@@ -15,6 +15,9 @@ export const DEFAULT_AGENT_ID = "main";
 
 function buildAgentPaths(api: OpenClawPluginApi, agentId: string) {
   const workspaceDir = api.runtime.agent.resolveAgentWorkspaceDir(api.config, agentId);
+  const rootDir = api.rootDir ?? ".";
+  const walletJwkPath = (api.pluginConfig as { arweaveAnchoring?: { walletJwkPath?: unknown } } | undefined)
+    ?.arweaveAnchoring?.walletJwkPath;
   const PROTECTED_FILES = [
     { label: "AGENTS.md", path: join(workspaceDir, "AGENTS.md") },
     { label: "IDENTITY.md", path: join(workspaceDir, "IDENTITY.md") },
@@ -24,11 +27,19 @@ function buildAgentPaths(api: OpenClawPluginApi, agentId: string) {
     // actual write block below covers the whole nancy/src/ directory, not
     // just this one file, since NanCy's logic is split across many modules
     // under src/ (see NANCY_SRC_DIR).
-    { label: "nancy/src/ (all NanCy source files)", path: join(api.rootDir ?? ".", "src", "index.ts") },
-    { label: "nancy/openclaw.plugin.json", path: join(api.rootDir ?? ".", "openclaw.plugin.json") },
-    { label: "nancy/NANCY-POLICY.md", path: join(api.rootDir ?? ".", "NANCY-POLICY.md") },
+    { label: "nancy/src/ (all NanCy source files)", path: join(rootDir, "src", "index.ts") },
+    { label: "nancy/openclaw.plugin.json", path: join(rootDir, "openclaw.plugin.json") },
+    { label: "nancy/NANCY-POLICY.md", path: join(rootDir, "NANCY-POLICY.md") },
+    ...(typeof walletJwkPath === "string" && walletJwkPath
+      ? [{ label: "Arweave wallet JWK (private signing key)", path: walletJwkPath }]
+      : []),
   ];
   const PROTECTED_PATHS = new Map(PROTECTED_FILES.map(f => [canonicalPath(f.path), f.label]));
+  const SENSITIVE_READ_PATHS = new Map(
+    typeof walletJwkPath === "string" && walletJwkPath
+      ? [[canonicalPath(walletJwkPath), "Arweave wallet JWK (private signing key)"]]
+      : [],
+  );
   // tasks/ is now written exclusively by NanCy's own confirmation-reply
   // handling — the agent must not be able to write its own "confirmed"
   // record, or it could fabricate user consent that was never given.
@@ -36,8 +47,17 @@ function buildAgentPaths(api: OpenClawPluginApi, agentId: string) {
   // NanCy's own logic lives under src/ as multiple modules (see CLAUDE.md) —
   // the whole directory must be protected, not just index.ts, or the agent
   // could defang NanCy by rewriting e.g. policy/tool-policy.ts instead.
-  const NANCY_SRC_DIR = canonicalPath(resolve(api.rootDir ?? ".", "src"));
-  return { workspaceDir, PROTECTED_FILES, PROTECTED_PATHS, TASKS_DIR, NANCY_SRC_DIR };
+  const NANCY_SRC_DIR = canonicalPath(resolve(rootDir, "src"));
+  const NANCY_INTEGRITY_DIR = canonicalPath(resolve(rootDir, ".nancy-integrity"));
+  const NANCY_LOG_PATHS = new Map([
+    [canonicalPath(resolve(rootDir, "nancy.log")), "nancy/nancy.log (security audit log)"],
+    [canonicalPath(resolve(rootDir, "nancy.log.1")), "nancy/nancy.log.1 (rotated security audit log)"],
+    [canonicalPath(resolve(rootDir, "nancy-analysis.log")), "nancy/nancy-analysis.log (review audit log)"],
+    [canonicalPath(resolve(rootDir, "nancy-analysis.log.1")), "nancy/nancy-analysis.log.1 (rotated review audit log)"],
+    [canonicalPath(resolve(rootDir, "nancy-integrity.log")), "nancy/nancy-integrity.log (anchor journal)"],
+    [canonicalPath(resolve(rootDir, "nancy-integrity.log.1")), "nancy/nancy-integrity.log.1 (rotated anchor journal)"],
+  ]);
+  return { workspaceDir, PROTECTED_FILES, PROTECTED_PATHS, SENSITIVE_READ_PATHS, TASKS_DIR, NANCY_SRC_DIR, NANCY_INTEGRITY_DIR, NANCY_LOG_PATHS };
 }
 
 function platformPath(path: string): string {
@@ -95,9 +115,31 @@ export function createProtectedPathsResolver(api: OpenClawPluginApi) {
       if (resolved === paths.NANCY_SRC_DIR || resolved.startsWith(paths.NANCY_SRC_DIR + sep)) {
         return "nancy/src/ (NanCy's own source code, protected)";
       }
+      if (resolved === paths.NANCY_INTEGRITY_DIR || resolved.startsWith(paths.NANCY_INTEGRITY_DIR + sep)) {
+        return "nancy/.nancy-integrity/ (NanCy's integrity-chain state, protected)";
+      }
+      const logLabel = paths.NANCY_LOG_PATHS.get(resolved);
+      if (logLabel) return logLabel;
     }
     return null;
   }
 
-  return { getAgentPaths, protectedWriteTarget };
+  // Unlike ordinary protected files, the private signing key must not be
+  // readable by the agent either. Check explicit and host-derived paths for
+  // every tool family; this catches direct read calls and exec paths the host
+  // successfully extracts. OS isolation remains required for aliases or
+  // shell indirection the host cannot derive.
+  function sensitiveReadTarget(event: { params: unknown; derivedPaths?: readonly string[] }, paths: AgentPaths): string | null {
+    const candidates: string[] = [];
+    const p = (event.params as Record<string, unknown>)?.path;
+    if (typeof p === "string") candidates.push(p);
+    if (Array.isArray(event.derivedPaths)) candidates.push(...event.derivedPaths);
+    for (const candidate of candidates) {
+      const label = paths.SENSITIVE_READ_PATHS.get(canonicalPath(resolve(paths.workspaceDir, candidate)));
+      if (label) return label;
+    }
+    return null;
+  }
+
+  return { getAgentPaths, protectedWriteTarget, sensitiveReadTarget };
 }

@@ -28,12 +28,13 @@ Status: early-stage and "research and development only" per README's warning ban
 - `src/notifications/telegram.ts` — Telegram alerting/status pushes, block-alert debounce.
 - `src/browser/snapshot.ts` — `fetchBrowserSnapshot()` and snapshot file naming/pruning — DOM Biopsy (feature #5).
 - `src/logging/logger.ts` — `logDecision()`, log rotation.
+- `src/integrity/arweave-anchor.ts` — optional changed-only SHA-256 manifests for logs/control files, application-level Arweave chaining, confirmation checks, protected local state, and manifest verification.
 - `src/state.ts` — per-session state: bounded recent call/reasoning/denial ring buffers, cron-trigger correlation, call/denial counters, macro-review serialization, session-generation tokens, termination flags.
-- Config schema lives in `openclaw.plugin.json` (`analysis`, `browser`, `domains`, `macroReview`, `limits`, `mainSessionKey`, `mainSessionIdleMinutes`, `workerAgentId`, `telegramAlerts`, `testMode`).
+- Config schema lives in `openclaw.plugin.json` (`analysis`, `browser`, `domains`, `arweaveAnchoring`, `macroReview`, `limits`, `mainSessionKey`, `mainSessionIdleMinutes`, `workerAgentId`, `telegramAlerts`, `testMode`).
 
 ## Feature status (see README §"Key Technical Features" for full detail)
 
-✅ implemented: SSIL one-shot analysis (#1), intent confirmation & gap detection (#2), Domain Border Control (#3), main/worker session split (#7, optional), behavioral review plus deterministic denial termination (#8), permanent operator policy (#9), write-protection for core files (#6).
+✅ implemented: SSIL one-shot analysis (#1), intent confirmation & gap detection (#2), Domain Border Control (#3), main/worker session split (#7, optional), behavioral review plus deterministic denial termination (#8), permanent operator policy (#9), write-protection for core files (#6), and optional Arweave integrity anchoring (#11).
 
 🧭 not implemented: Contextual Scrambler / dedicated prompt-injection defense (#4).
 
@@ -48,6 +49,8 @@ Work has been on the operational/runtime side: cron-triggered runs are gated lik
 - `nancy.log` — general plugin log
 - `nancy-analysis.log` — LLM analysis verdicts
 - `snapshots/` — browser DOM snapshots
+- `nancy-integrity.log` — Arweave submission/confirmation journal; deliberately excluded from its own source set to avoid self-triggering anchors
+- `.nancy-integrity/anchor-state.json` — protected local head of the application-level Arweave chain
 
 ## Docs map
 
@@ -62,6 +65,7 @@ Work has been on the operational/runtime side: cron-triggered runs are gated lik
 - `docs/architecture/gap-detection.md` — design rationale for the advisory unspecified-decision-point check (feature #2's gap-detection half): prompt design, failure modes, config, and known limitations
 - `docs/architecture/policy-precedence.md` — exactly which decision prompts explicitly name a standing-policy violation as its own BLOCK trigger (vs. relying on context alone), and which deliberately don't yet — read before editing any `Use BLOCK when...` sentence in `src/index.ts`
 - `docs/architecture/debate-review.md` — experimental optional FOR/AGAINST/JUDGE full review, implemented in `src/analysis/debate.ts`; `analysis.debateMode` defaults to off. Every mode fails closed on full-review errors, including outbound messages. Comparative real-model evaluation remains outstanding.
+- `docs/architecture/arweave-integrity-anchoring.md` — permanent hash-manifest source set, 15-minute changed-only cadence, chain/confirmation semantics, key handling, privacy limits, and verification
 - `docs/audits/2026-09-14-security-review.md` — repository-wide security review, reproduced findings, corrections, and verification evidence.
 - `TESTING.md` — how to test changes: `npm test` (mocked, fast) vs. a standalone harness against the real reviewer model (genuine verdicts, zero live-gateway risk), the confirmed-task file format, and why the live gateway must never be stopped/restarted for testing
 - `EVAL-RESULTS.md` — generated report from `scripts/run-eval.mts` (a fixed, hand-written scenario set in `scripts/eval-scenarios.json`, run against the real configured reviewer model via the Option B pattern). Regenerate with `node --experimental-strip-types scripts/run-eval.mts`; re-run whenever `analysis.model` or the policy/analysis modules change, to catch reviewer-behavior regressions.

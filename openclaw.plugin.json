@@ -84,6 +84,63 @@
           }
         }
       },
+      "arweaveAnchoring": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Optional tamper-evident Arweave anchors for NanCy logs, protected files, source, runtime package metadata, and confirmation records. Publishes hashes and bounded labels only, never source contents or the wallet key.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Enable periodic Arweave integrity anchoring. Default false. A funded private JWK is required when enabled."
+          },
+          "intervalMinutes": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 1440,
+            "description": "Check for changes and publish at most one new manifest this often. Unchanged source sets are skipped. Default 15 minutes."
+          },
+          "gatewayUrl": {
+            "type": "string",
+            "description": "Arweave gateway origin. Default https://arweave.net. HTTPS is required except for a loopback localnet."
+          },
+          "walletJwk": {
+            "description": "Private Arweave JWK JSON. Prefer an environment SecretInput such as {\"source\":\"env\",\"id\":\"NANCY_ARWEAVE_WALLET_JWK\"}; do not store the key directly in openclaw.json.",
+            "oneOf": [
+              { "type": "string" },
+              {
+                "type": "object",
+                "additionalProperties": true,
+                "properties": {
+                  "source": { "type": "string" },
+                  "provider": { "type": "string" },
+                  "id": { "type": "string" }
+                },
+                "required": ["source", "id"]
+              }
+            ]
+          },
+          "walletJwkPath": {
+            "type": "string",
+            "description": "Alternative absolute path to a private JWK file. Keep it outside agent workspaces and protect it with OS permissions. Never anchored."
+          },
+          "includeTaskRecords": {
+            "type": "boolean",
+            "description": "Include hashes of NanCy-owned tasks/*.json confirmation audit records. Default true."
+          },
+          "anchorOnStartup": {
+            "type": "boolean",
+            "description": "Request a changed anchor after gateway startup. Default true."
+          },
+          "anchorOnShutdown": {
+            "type": "boolean",
+            "description": "Request a final changed anchor before gateway shutdown. Default true."
+          },
+          "requirePreviousConfirmation": {
+            "type": "boolean",
+            "description": "Do not publish the next link until the gateway reports the previous transaction mined. Default true; recommended for an auditable unbroken chain."
+          }
+        }
+      },
       "macroReview": {
         "type": "object",
         "additionalProperties": false,

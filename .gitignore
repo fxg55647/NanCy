@@ -1,4 +1,5 @@
 *.log
+.nancy-integrity/
 snapshots/
 node_modules/
 _site/

@@ -191,6 +191,19 @@ it (a future code path could read `channels.telegram` some other way).
   just blocked (e.g. still typing into a field on what it believes is a
   checkout page) — that's the reviewer using state, not a bug in the harness.
 
+## Arweave integrity anchoring
+
+The normal suite never reads a wallet or contacts Arweave. `test/integrity-anchor.test.ts` injects a fake publisher and covers exact-prefix hashing, raw-content exclusion, deterministic manifests, changed-only publication, confirmation gating, chain links, corrupt-state refusal, and direct-write protection for logs/local chain state.
+
+After an operator deliberately enables `arweaveAnchoring` with a dedicated funded wallet, inspect `nancy-integrity.log` for `arweave_anchor_submitted` followed by `arweave_anchor_confirmed`. A gateway accepting a transaction is not the same as it being mined. The verifier requires confirmed transactions, verifies their tags and complete manifest hashes, and can optionally walk the application-level history:
+
+```bash
+npm run verify:arweave -- <transaction-id>
+npm run verify:arweave -- <transaction-id> --chain
+```
+
+Do not put a real JWK in a test fixture, repository file, command line, or captured test output. Use an environment SecretInput or an absolute OS-protected path outside every agent workspace. See `docs/architecture/arweave-integrity-anchoring.md` for localnet/gateway rules and what the resulting proof does and does not establish.
+
 ## Reusable scenario eval (`scripts/run-eval.mts`)
 
 A fixed, hand-written set of scenarios (`scripts/eval-scenarios.json`) — protected-path writes, the main/cron default-deny gate, the no-confirmed-task hard block, Domain Border Control, and genuine intent-match/mismatch/ambiguous cases — runnable end-to-end against the real configured reviewer model with the exact Option B safety properties above (`testMode: true`, live gateway never touched, no channels/telegram config passed into the harness). Run it and it (re)writes `EVAL-RESULTS.md` at the repo root:

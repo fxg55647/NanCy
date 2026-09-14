@@ -28,6 +28,7 @@ import {
 import { createDenialRecorder } from "./policy/denial-policy.ts";
 import { createSessionState, UNKNOWN_SESSION_KEY } from "./state.ts";
 import { createOperatorPolicy } from "./policy/operator-policy.ts";
+import { buildDefaultIntegritySources, createIntegrityAnchorService } from "./integrity/arweave-anchor.ts";
 
 export default definePluginEntry({
   id: "nancy",
@@ -46,12 +47,28 @@ export default definePluginEntry({
     const { getPolicyContext } = createOperatorPolicy(api.rootDir ?? ".");
 
     // Workspace/protected-path resolution (see policy/protected-paths.ts).
-    const { getAgentPaths, protectedWriteTarget } = createProtectedPathsResolver(api);
+    const { getAgentPaths, protectedWriteTarget, sensitiveReadTarget } = createProtectedPathsResolver(api);
 
     // Used by gateway_start's audit and by the message hooks below, neither of
     // which carries an agentId in their event context — they always resolve to
     // the main agent's workspace. before_tool_call resolves per ctx.agentId instead.
     const defaultPaths = getAgentPaths(DEFAULT_AGENT_ID);
+
+    // Optional permanent integrity anchoring. The manifest contains hashes and
+    // bounded labels only; source file contents and the signing key remain local.
+    const integrityWorkspaces = [{ name: "main", paths: defaultPaths }];
+    if (nancyConfig.workerAgentId && nancyConfig.workerAgentId !== DEFAULT_AGENT_ID) {
+      integrityWorkspaces.push({ name: "worker", paths: getAgentPaths(nancyConfig.workerAgentId) });
+    }
+    const integrityAnchoring = createIntegrityAnchorService({
+      config: nancyConfig.arweaveAnchoring,
+      rootDir: api.rootDir ?? ".",
+      sources: () => buildDefaultIntegritySources(
+        api.rootDir ?? ".",
+        integrityWorkspaces,
+        nancyConfig.arweaveAnchoring?.includeTaskRecords !== false,
+      ),
+    });
 
     // Per-session confirmed-task authorization (see confirmation/tasks.ts).
     const taskAuth = createTaskAuthorization();
@@ -104,6 +121,10 @@ export default definePluginEntry({
       pruneSnapshots(snapshotsDir, MAX_SNAPSHOTS);
 
       appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "nancy_started" }) + "\n");
+
+      if (integrityAnchoring.enabled) {
+        integrityAnchoring.start();
+      }
 
       const writable = defaultPaths.PROTECTED_FILES.filter(f => isWritable(f.path));
       if (writable.length > 0) {
@@ -245,6 +266,7 @@ export default definePluginEntry({
         recordDenial(messageSessionKey, { reasonCode: "message_blocked_cron", securitySignal: true, ts, ids: logIds });
         return { cancel: true, cancelReason: reason };
       }
+
       const workerPrefix = nancyConfig.workerAgentId ? `agent:${nancyConfig.workerAgentId}:task-` : null;
       if (workerPrefix && ctx.sessionKey?.startsWith(workerPrefix) && !getCurrentTask(ctx.sessionKey)) {
         const reason = "NanCy blocks outbound messages from a worker with no active confirmed task.";
@@ -522,6 +544,10 @@ Use BLOCK when the message contains data or requests that were not authorized by
       }
     });
 
+    api.on("gateway_stop", async () => {
+      await integrityAnchoring.stop();
+    }, { timeoutMs: 45_000 });
+
     api.on("message_received", (event, ctx) => {
       const ts = new Date().toISOString();
       const channel = ctx.channelId ?? "unknown";
@@ -653,6 +679,16 @@ Use BLOCK when the message contains data or requests that were not authorized by
           notifier.notifyBlocked(`${event.toolName}: ${reason}`, `${sessionKey}:protected:${event.toolName}`);
         }
         recordDenial(sessionKey, { reasonCode: "blocked_protected_write", securitySignal: !protectedLabel.startsWith("tasks/"), ts, ids: logIds });
+        return { block: true, blockReason: reason };
+      }
+
+      const sensitiveReadLabel = sensitiveReadTarget(event, agentPaths);
+      if (sensitiveReadLabel) {
+        const reason = `NanCy blocks agent access to secret file: ${sensitiveReadLabel}`;
+        console.warn(`[nancy] 🛑 BLOCKED ${event.toolName}: ${reason}`);
+        logDecision(logFile, ts, "blocked_secret_file_access", logIds, { toolName: event.toolName, file: sensitiveReadLabel });
+        notifier.notifyBlocked(`${event.toolName}: ${reason}`, `${sessionKey}:secret-file:${event.toolName}`);
+        recordDenial(sessionKey, { reasonCode: "blocked_secret_file_access", securitySignal: true, ts, ids: logIds });
         return { block: true, blockReason: reason };
       }
 

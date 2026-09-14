@@ -35,6 +35,30 @@ export interface DomainConfig {
   urlhausAuthKey?: string;
 }
 
+export interface ArweaveAnchoringConfig {
+  // Explicit opt-in. No wallet is read and no network call is made otherwise.
+  enabled?: boolean;
+  // Publish at most one changed manifest this often. Default 15 minutes.
+  intervalMinutes?: number;
+  // Standard gateway by default. HTTP is accepted only for loopback localnets.
+  gatewayUrl?: string;
+  // Prefer an env SecretInput, for example
+  // { source: "env", id: "NANCY_ARWEAVE_WALLET_JWK" }. The resolved value
+  // must be the complete private JWK JSON string.
+  walletJwk?: unknown;
+  // Alternative absolute path to a private JWK file. Keep it outside every
+  // agent workspace and protect it with OS permissions.
+  walletJwkPath?: string;
+  // Include NanCy-owned tasks/*.json confirmation audit records. Default true.
+  includeTaskRecords?: boolean;
+  // Request an anchor after gateway startup / before shutdown. Both default true.
+  anchorOnStartup?: boolean;
+  anchorOnShutdown?: boolean;
+  // Do not extend the chain until the gateway reports the previous
+  // transaction mined. Default true.
+  requirePreviousConfirmation?: boolean;
+}
+
 export interface NancyConfig {
   analysis?: AnalysisConfig;
   browser?: {
@@ -42,6 +66,10 @@ export interface NancyConfig {
     token?: string;
   };
   domains?: DomainConfig;
+  // Optional permanent integrity anchors for logs, protected control files,
+  // source code and task audit records. Only hashes and bounded metadata are
+  // published; never the file contents or wallet key.
+  arweaveAnchoring?: ArweaveAnchoringConfig;
   // Cadence of the periodic behavioral review (macro-review, feature #9).
   // Unset = fixed every 10 calls.
   macroReview?: MacroReviewConfig;
