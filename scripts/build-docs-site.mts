@@ -146,7 +146,7 @@ function pageTemplate(title: string, bodyHtml: string, currentOutput: string): s
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${title} — NanCy SSIL</title>
+<title>${title === "NanCy SSIL" ? title : `${title} — NanCy SSIL`}</title>
 <style>
 :root {
   --bg: #ffffff; --fg: #1a1a1a; --muted: #5b6472; --border: #e2e5ea;
