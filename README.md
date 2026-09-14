@@ -1,6 +1,20 @@
 # NanCy SSIL: Stateless Security Interruption Layer
 ## A Fail-Safe Layer for OpenClaw
 ![](https://github.com/fxg55647/NanCy/blob/main/images/nancy.png)
+
+## Contents
+
+- [Overview](#overview)
+- [The Core Concept: Intent Anchoring & Stateless Verification](#the-core-concept-intent-anchoring--stateless-verification)
+- [What This Enables](#what-this-enables)
+- [What NanCy Adds to OpenClaw](#what-nancy-adds-to-openclaw)
+- [Key Technical Features](#key-technical-features)
+- [The Philosophy: Assume Compromise & Pragmatic Safety](#the-philosophy-assume-compromise--pragmatic-safety)
+- [Security philosophy](#security-philosophy)
+- [Where This Fits](#where-this-fits)
+- [Common Misconceptions](#common-misconceptions)
+- [Getting Started](#getting-started)
+
 ## Overview
 
 *"Turning AI agents from truly terrifying to normally suspicious".*
