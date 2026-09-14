@@ -3,7 +3,7 @@
 // left unspecified — a price ceiling, a delivery deadline, compatibility
 // requirements, etc. — as a NanCy-authored note appended after the agent's
 // own fixed-template message, before the human decides. See
-// confirmation-lifecycle.test.ts for the "no analysis configured" fallback.
+// confirmation-lifecycle.test.ts for the missing-analysis fail-closed gate.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
@@ -14,12 +14,18 @@ import { parseGapDetectionResponse, appendGapNote } from "../src/confirmation/ga
 
 const analysisCfg = { provider: "openai" as const, model: "test-model", apiKey: "x" };
 
-function mockFetchOnce(content: string): () => void {
+function mockFetchSequence(contents: Array<string | Error>): () => void {
   const orig = globalThis.fetch;
   // @ts-expect-error minimal test stub, not a full fetch implementation
-  globalThis.fetch = async () => ({ ok: true, json: async () => ({ choices: [{ message: { content } }] }) });
+  globalThis.fetch = async () => {
+    const next = contents.shift();
+    if (next instanceof Error) throw next;
+    return { ok: true, json: async () => ({ choices: [{ message: { content: next } }] }) };
+  };
   return () => { globalThis.fetch = orig; };
 }
+
+const allow = "VERDICT: ALLOW\nREASON: safe confirmation request";
 
 function auditRecordPath(rootDir: string, id: string): string {
   return join(rootDir, "workspace", "main", "tasks", `${id}.json`);
@@ -71,7 +77,7 @@ test("appendGapNote appends a clearly separate, NanCy-attributed note after the 
 // --- End-to-end via message_sending ---
 
 test("a vague description gets a gap note appended, and the noted message is still what gets confirmed", async () => {
-  const restore = mockFetchOnce('{"gaps": ["price ceiling", "delivery deadline"]}');
+  const restore = mockFetchSequence([allow, '{"gaps": ["price ceiling", "delivery deadline"]}']);
   const { api, handlers, rootDir, cleanup } = createFakeApi({ pluginConfig: { analysis: analysisCfg } });
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -102,7 +108,7 @@ test("a vague description gets a gap note appended, and the noted message is sti
 });
 
 test("a well-specified description with no gaps is sent unmodified", async () => {
-  const restore = mockFetchOnce('{"gaps": []}');
+  const restore = mockFetchSequence([allow, '{"gaps": []}']);
   const { api, handlers, rootDir, cleanup } = createFakeApi({ pluginConfig: { analysis: analysisCfg } });
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -120,10 +126,10 @@ test("a well-specified description with no gaps is sent unmodified", async () =>
 });
 
 test("gapDetection: false skips the check entirely, even with analysis configured", async () => {
-  let called = false;
+  let calls = 0;
   const orig = globalThis.fetch;
   // @ts-expect-error minimal test stub
-  globalThis.fetch = async () => { called = true; return { ok: true, json: async () => ({ choices: [{ message: { content: '{"gaps": ["x"]}' } }] }) }; };
+  globalThis.fetch = async () => { calls += 1; return { ok: true, json: async () => ({ choices: [{ message: { content: allow } }] }) }; };
   const { api, handlers, cleanup } = createFakeApi({ pluginConfig: { analysis: analysisCfg, gapDetection: false } });
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -131,16 +137,15 @@ test("gapDetection: false skips the check entirely, even with analysis configure
     const original = confirmationContent("200003", "Buy something vague");
     const result = await handlers.message_sending({ content: original, to: "user" }, { sessionKey: "sess-off", channelId: "test" });
     assert.equal(result, undefined);
-    assert.equal(called, false, "gapDetection: false must skip the LLM call entirely, not just discard its result");
+    assert.equal(calls, 1, "gapDetection: false must skip only the advisory call; the security review remains mandatory");
   } finally {
     globalThis.fetch = orig;
     cleanup();
   }
 });
 
-test("a failed gap-detection call fails open: the confirmation still sends unmodified and still gets granted", async () => {
-  const orig = globalThis.fetch;
-  globalThis.fetch = async () => { throw new Error("network down"); };
+test("a failed advisory gap-detection call leaves an already safety-reviewed confirmation unchanged", async () => {
+  const restore = mockFetchSequence([allow, new Error("network down")]);
   const { api, handlers, rootDir, cleanup } = createFakeApi({ pluginConfig: { analysis: analysisCfg } });
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -155,7 +160,7 @@ test("a failed gap-detection call fails open: the confirmation still sends unmod
     handlers.message_received({ content: "y" }, { sessionKey: "sess-error" });
     assert.equal(existsSync(auditRecordPath(rootDir, "200004")), true, "the confirmation must still be grantable despite the gap check failing");
   } finally {
-    globalThis.fetch = orig;
+    restore();
     cleanup();
   }
 });

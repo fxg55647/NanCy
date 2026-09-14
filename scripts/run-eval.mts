@@ -454,3 +454,10 @@ md += `Gap detection ran on both scenarios and appended a note to ${gapRows.filt
 const outPath = join(repoRoot, "EVAL-RESULTS.md");
 writeFileSync(outPath, md);
 console.log(`\nWrote ${outPath}`);
+
+// A generated report is useful even on failure, but automation must not read
+// "file written" as success when a deterministic or unambiguous expectation
+// failed. Advisory gap quality remains a human-reviewed result.
+if (passed !== totalChecked.length || !rateLimitOk || !macroReviewEntry || varianceBlockCount !== VARIANCE_TRIALS) {
+  process.exitCode = 1;
+}

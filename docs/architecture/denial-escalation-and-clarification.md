@@ -4,7 +4,7 @@ Status: **Parts A and B are implemented with runtime-scoped counters. Part C is 
 
 ## Why this exists
 
-NanCy currently evaluates individual consequential actions and periodically reviews a session's recent behavior. A reviewer verdict of `BLOCK` or `CLARIFY` stops that one action, while a macro-review may terminate the session. There is no deterministic upper bound on how many rejected actions a session may attempt, and a worker cannot pause mid-run to ask the operator a question and then safely resume.
+NanCy evaluates individual consequential actions and periodically reviews a session's recent behavior. A reviewer verdict of `BLOCK` or `CLARIFY` stops that action, while a macro-review may terminate the session. Parts A and B added a deterministic upper bound and burst-triggered review. A worker still cannot pause mid-run to ask the operator a question and safely resume; Part C remains a proposal.
 
 The proposed change has three independent parts:
 
@@ -19,6 +19,8 @@ Parts 1 and 2 do not depend on clarification mode. Clarification mode must not b
 - Both `before_tool_call` and `message_sending` block a terminated session before further review.
 - A `CLARIFY` verdict is treated as `BLOCK`; there is no mid-task dialogue with a worker.
 - Periodic macro-review remains an LLM judgment, but an independent runtime counter terminates a session after the configured number of classified security denials.
+- Macro-review receives bounded recent call metadata plus bounded denial reason codes and reasons. Raw attempted payloads are not copied into this history.
+- Each session has a generation token. A macro-review result is applied only if the exact session still has the same generation, so a review that finishes after `session_end` cannot terminate or otherwise mutate a later reuse of the key.
 - Session counters and termination flags are held in memory and cleared by `session_end` or a gateway restart.
 - Confirmed workers are autonomous runs. The main chat does not have a live conversational connection to a worker while it runs.
 
@@ -97,7 +99,7 @@ The durable form is the target security behavior. It needs bounded retention, at
 
 `macroReview.blockBurstThreshold` (default `3`) requests a macro-review when the burst counter reaches the threshold. The deterministic hard ceiling is checked first and does not depend on the macro-review result.
 
-Only one macro-review may run for a session at a time. A second request arriving during a review must set one pending-review flag. When the running review finishes, one new review uses the latest bounded history and clears that flag. This coalesces a burst without running concurrent reviewers or discarding the fact that another threshold was reached.
+Only one macro-review may run for a session at a time. A second request arriving during a review sets one pending-review flag. When the running review finishes, one new review uses the latest bounded history and clears that flag. This coalesces a burst without running concurrent reviewers or discarding the fact that another threshold was reached. Each review captures the session generation and checks it again before applying a verdict; a stale result is discarded after session cleanup or key reuse.
 
 After a burst review is accepted for execution:
 

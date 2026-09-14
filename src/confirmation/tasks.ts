@@ -83,6 +83,8 @@ export interface PendingConfirmation {
   ts: number;
   rawContent: string;
   messageId?: string;
+  expectedFrom?: string;
+  channelId?: string;
 }
 
 // Confirmation requests sent to the user, awaiting their y/n reply, keyed by

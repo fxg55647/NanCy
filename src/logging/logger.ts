@@ -1,12 +1,15 @@
-import { appendFileSync, renameSync, statSync } from "fs";
+import { appendFileSync, renameSync, statSync, unlinkSync } from "fs";
 
 // Single-generation rotation: renames the file aside once it crosses the size
-// cap. Called at gateway_start rather than per-write, so it doesn't add a
-// stat() call to every single log line on a busy gateway.
+// cap. The startup call handles old files; logDecision also invokes it before
+// every decision write so a long-lived gateway cannot grow without bound.
 const MAX_LOG_BYTES = 20 * 1024 * 1024;
 export function rotateLogIfLarge(path: string): void {
   try {
-    if (statSync(path).size > MAX_LOG_BYTES) renameSync(path, `${path}.1`);
+    if (statSync(path).size > MAX_LOG_BYTES) {
+      try { unlinkSync(`${path}.1`); } catch { /* no previous generation */ }
+      renameSync(path, `${path}.1`);
+    }
   } catch { /* file doesn't exist yet — nothing to rotate */ }
 }
 
@@ -18,5 +21,6 @@ export function rotateLogIfLarge(path: string): void {
 // taskId is the currently-confirmed task, if any (see getCurrentTask).
 export type LogIds = { sessionKey?: string; runId?: string; toolCallId?: string; taskId?: string };
 export function logDecision(file: string, ts: string, event: string, ids: LogIds, extra: Record<string, unknown> = {}): void {
+  rotateLogIfLarge(file);
   appendFileSync(file, JSON.stringify({ ts, event, ...ids, ...extra }) + "\n");
 }

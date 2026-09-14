@@ -1,5 +1,6 @@
 import { FETCH_TIMEOUT_MS } from "../constants.ts";
 import type { DomainConfig } from "../config.ts";
+import { domainToASCII } from "node:url";
 
 export function extractCandidateUrl(toolName: string, params: unknown): string | null {
   const p = params as Record<string, unknown>;
@@ -9,9 +10,14 @@ export function extractCandidateUrl(toolName: string, params: unknown): string |
   return null;
 }
 
+function normalizeHostname(value: string): string {
+  return domainToASCII(value.trim().replace(/^\*\./, "").replace(/\.+$/, "")).toLowerCase();
+}
+
 function hostnameMatches(hostname: string, pattern: string): boolean {
-  const h = hostname.toLowerCase();
-  const pat = pattern.toLowerCase().replace(/^\*\./, "");
+  const h = normalizeHostname(hostname);
+  const pat = normalizeHostname(pattern);
+  if (!h || !pat) return false;
   return h === pat || h.endsWith(`.${pat}`);
 }
 
@@ -21,19 +27,21 @@ function hostnameMatches(hostname: string, pattern: string): boolean {
 const urlhausCache = new Map<string, { malicious: boolean; ts: number }>();
 const URLHAUS_CACHE_TTL_MS = 10 * 60 * 1000;
 
-async function checkUrlhausReputation(hostname: string): Promise<boolean | null> {
+async function checkUrlhausReputation(hostname: string, authKey?: string): Promise<boolean | null> {
+  if (!authKey) return null;
   const cached = urlhausCache.get(hostname);
   if (cached && Date.now() - cached.ts < URLHAUS_CACHE_TTL_MS) return cached.malicious;
   try {
     const res = await fetch("https://urlhaus-api.abuse.ch/v1/host/", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: { "Content-Type": "application/x-www-form-urlencoded", "Auth-Key": authKey },
       body: `host=${encodeURIComponent(hostname)}`,
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!res.ok) return null;
     const data = await res.json() as { query_status?: string };
     // "ok" means the host was found in URLhaus's malicious-URL database
+    if (data.query_status !== "ok" && data.query_status !== "no_results") return null;
     const malicious = data.query_status === "ok";
     urlhausCache.set(hostname, { malicious, ts: Date.now() });
     return malicious;
@@ -121,7 +129,7 @@ async function checkDomainAgeDays(hostname: string): Promise<number | null> {
 export async function checkDomainBorder(url: string, cfg: DomainConfig | undefined): Promise<string | null> {
   let hostname: string;
   try {
-    hostname = new URL(url).hostname;
+    hostname = normalizeHostname(new URL(url).hostname);
   } catch {
     return `Could not parse URL for domain check: ${url}`;
   }
@@ -136,7 +144,7 @@ export async function checkDomainBorder(url: string, cfg: DomainConfig | undefin
   }
 
   if (cfg?.reputationCheck !== false) {
-    const malicious = await checkUrlhausReputation(hostname);
+    const malicious = await checkUrlhausReputation(hostname, cfg?.urlhausAuthKey);
     if (malicious) return `Domain "${hostname}" is flagged as malicious by URLhaus (abuse.ch).`;
   }
 

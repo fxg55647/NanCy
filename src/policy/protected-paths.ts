@@ -1,5 +1,5 @@
-import { accessSync, constants } from "fs";
-import { join, resolve, sep } from "path";
+import { accessSync, constants, existsSync, realpathSync } from "fs";
+import { dirname, basename, join, resolve, sep } from "path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 
 export function isWritable(filePath: string): boolean {
@@ -28,16 +28,37 @@ function buildAgentPaths(api: OpenClawPluginApi, agentId: string) {
     { label: "nancy/openclaw.plugin.json", path: join(api.rootDir ?? ".", "openclaw.plugin.json") },
     { label: "nancy/NANCY-POLICY.md", path: join(api.rootDir ?? ".", "NANCY-POLICY.md") },
   ];
-  const PROTECTED_PATHS = new Map(PROTECTED_FILES.map(f => [resolve(f.path), f.label]));
+  const PROTECTED_PATHS = new Map(PROTECTED_FILES.map(f => [canonicalPath(f.path), f.label]));
   // tasks/ is now written exclusively by NanCy's own confirmation-reply
   // handling — the agent must not be able to write its own "confirmed"
   // record, or it could fabricate user consent that was never given.
-  const TASKS_DIR = resolve(workspaceDir, "tasks");
+  const TASKS_DIR = canonicalPath(resolve(workspaceDir, "tasks"));
   // NanCy's own logic lives under src/ as multiple modules (see CLAUDE.md) —
   // the whole directory must be protected, not just index.ts, or the agent
   // could defang NanCy by rewriting e.g. policy/tool-policy.ts instead.
-  const NANCY_SRC_DIR = resolve(api.rootDir ?? ".", "src");
+  const NANCY_SRC_DIR = canonicalPath(resolve(api.rootDir ?? ".", "src"));
   return { workspaceDir, PROTECTED_FILES, PROTECTED_PATHS, TASKS_DIR, NANCY_SRC_DIR };
+}
+
+function platformPath(path: string): string {
+  return process.platform === "win32" ? path.toLowerCase() : path;
+}
+
+// Resolve filesystem aliases for an existing target. For a new target,
+// resolve the nearest existing parent and append the missing suffix. This is
+// still complemented by OS permissions; no user-space precheck can eliminate
+// every symlink race between decision and write.
+function canonicalPath(input: string): string {
+  let current = resolve(input);
+  const missing: string[] = [];
+  while (!existsSync(current)) {
+    const parent = dirname(current);
+    if (parent === current) break;
+    missing.unshift(basename(current));
+    current = parent;
+  }
+  try { current = realpathSync.native(current); } catch { /* retain resolved form */ }
+  return platformPath(resolve(current, ...missing));
 }
 
 export type AgentPaths = ReturnType<typeof buildAgentPaths>;
@@ -65,7 +86,7 @@ export function createProtectedPathsResolver(api: OpenClawPluginApi) {
     if (typeof p === "string") candidates.push(p);
     if (Array.isArray(event.derivedPaths)) candidates.push(...event.derivedPaths);
     for (const c of candidates) {
-      const resolved = resolve(paths.workspaceDir, c);
+      const resolved = canonicalPath(resolve(paths.workspaceDir, c));
       const label = paths.PROTECTED_PATHS.get(resolved);
       if (label) return label;
       if (resolved === paths.TASKS_DIR || resolved.startsWith(paths.TASKS_DIR + sep)) {

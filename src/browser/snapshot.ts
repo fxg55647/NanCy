@@ -2,11 +2,16 @@ import { existsSync, readdirSync, statSync, unlinkSync } from "fs";
 import { join } from "path";
 import { FETCH_TIMEOUT_MS } from "../constants.ts";
 
-export async function fetchBrowserSnapshot(port: number, token?: string): Promise<string | null> {
+export async function fetchBrowserSnapshot(port: number, token?: string, params?: unknown): Promise<string | null> {
   try {
     const headers: Record<string, string> = {};
     if (token) headers["Authorization"] = `Bearer ${token}`;
-    const res = await fetch(`http://127.0.0.1:${port}/snapshot?format=ai`, { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    const query = new URLSearchParams({ format: "ai" });
+    const p = params as Record<string, unknown> | undefined;
+    if (typeof p?.targetId === "string" && p.targetId.trim()) query.set("targetId", p.targetId.trim());
+    if (typeof p?.profile === "string" && p.profile.trim()) query.set("profile", p.profile.trim());
+    query.set("timeoutMs", String(FETCH_TIMEOUT_MS));
+    const res = await fetch(`http://127.0.0.1:${port}/snapshot?${query}`, { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
     if (!res.ok) return null;
     return await res.text();
   } catch {

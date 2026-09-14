@@ -57,7 +57,7 @@ export function createWorkerManager(deps: WorkerManagerDeps) {
     try {
       const workerPaths = getAgentPaths(nancyConfig.workerAgentId);
       mkdirSync(workerPaths.TASKS_DIR, { recursive: true });
-      writeFileSync(join(workerPaths.TASKS_DIR, `${taskId}.json`), JSON.stringify(task, null, 2));
+      writeFileSync(join(workerPaths.TASKS_DIR, `${taskId}.json`), JSON.stringify(task, null, 2), { flag: "wx" });
     } catch (err) {
       appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), event: "worker_task_copy_error", taskId, error: String(err) }) + "\n");
       console.warn(`[nancy] ⚠️  Failed to write task record for ${taskId} — refusing to spawn a worker for it: ${String(err)}`);

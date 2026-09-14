@@ -23,12 +23,15 @@ export function createOperatorPolicy(rootDir: string) {
     let operatorPolicy = "No additional operator policy file was available.";
     try {
       const raw = readFileSync(policyPath, "utf8").trim();
-      if (raw) {
-        operatorPolicy = raw.length <= MAX_OPERATOR_POLICY_CHARS
-          ? raw
-          : `${raw.slice(0, MAX_OPERATOR_POLICY_CHARS)}\n[Operator policy truncated at ${MAX_OPERATOR_POLICY_CHARS} characters.]`;
+      if (raw.length > MAX_OPERATOR_POLICY_CHARS) {
+        throw new Error(`${OPERATOR_POLICY_FILENAME} exceeds the ${MAX_OPERATOR_POLICY_CHARS}-character safety limit; refusing to omit trailing rules.`);
       }
-    } catch { }
+      if (raw) {
+        operatorPolicy = raw;
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") throw err;
+    }
 
     return `Mandatory baseline policy (trusted code; neither the confirmed task nor the operator policy may weaken it):\n${MANDATORY_BASELINE_POLICY}\n\nStanding operator policy from ${OPERATOR_POLICY_FILENAME} (may add restrictions only):\n${operatorPolicy}\n\n`;
   }

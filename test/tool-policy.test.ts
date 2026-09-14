@@ -20,6 +20,13 @@ test("known passive/read-only tools still skip analysis (no regression from the 
   }
 });
 
+test("read requires analysis for common credential-bearing paths", () => {
+  for (const path of ["~/.ssh/id_rsa", ".aws/credentials", ".env", ".env.production", "secrets.json", "C:\\Users\\me\\.kube\\config"]) {
+    assert.equal(shouldAnalyze("read", { path }), true, path);
+  }
+  assert.equal(shouldAnalyze("read", { path: "docs/report.md" }), false);
+});
+
 test("known always-analyze tools are unaffected by the unknown-tool default", () => {
   for (const toolName of ["web_fetch", "web_search", "write", "edit", "apply_patch", "message"]) {
     assert.equal(shouldAnalyze(toolName, {}), true);

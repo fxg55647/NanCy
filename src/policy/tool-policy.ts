@@ -27,39 +27,9 @@ const ALWAYS_ANALYZE = new Set([
   // channel delivery once this tool call is allowed to proceed).
   "message",
 ]);
-// Skip read-only and harmless shell commands to avoid adding Gemini latency
-// with no security value. cp/mv were removed from this list — both can
-// overwrite or relocate arbitrary files and are not safe to exempt.
-const SAFE_EXEC = /^(ls|pwd|mkdir|echo|cat|head|tail|whoami|date|cd)\b/;
-// Shell metacharacters that chain, redirect, substitute, or pipe commands.
-// A prefix match on SAFE_EXEC alone is not enough: "echo hi > AGENTS.md" or
-// "ls; rm -rf ~" both start with a safe verb but do something else entirely.
-// Any of these anywhere in the command forces full analysis, regardless of
-// which verb the command starts with.
-const SHELL_METACHARACTERS = /[;&|`$(){}<>]|\n/;
-// Of SAFE_EXEC's verbs, only cat/head/tail read arbitrary file *contents* —
-// ls/pwd/whoami/date reveal metadata at most, and mkdir/cd/echo never read a
-// file's content at all. A bare prefix match let e.g. `cat ~/.ssh/id_rsa` or
-// `cat ~/.aws/credentials` skip analysis entirely purely because "cat" is on
-// the allowlist — found via an eval scenario deliberately chaining calls
-// into credential access (see scripts/eval-scenarios.json /
-// scripts/run-eval.mts's macro-review section); the aggregate behavioral
-// review caught the overall pattern that time, but a single such read
-// should not rely on that as its only backstop.
-const CONTENT_READING_SAFE_VERBS = /^(cat|head|tail)\b/;
-// Deliberately not exhaustive — a deterministic backstop for well-known/
-// common credential-file shapes, not a substitute for full analysis.
-// Anything not matching SAFE_EXEC at all already goes through full
-// analysis regardless of this list.
-const SENSITIVE_PATH_PATTERN =
-  /(\.ssh[\\/]|\.aws[\\/](credentials|config)\b|\.env\b|[\\/]etc[\\/](shadow|passwd)\b|id_rsa|id_ed25519|id_ecdsa|\.pem\b|\.p12\b|\.pfx\b|\.pgpass\b|\.netrc\b|\.npmrc\b|\.pypirc\b|git-credentials|\.docker[\\/]config\.json|Login Data|cookies\.sqlite|credentials\.json|secrets\.json)/i;
-
-function isSafeExecCommand(cmd: string): boolean {
-  const trimmed = cmd.trim();
-  if (!SAFE_EXEC.test(trimmed) || SHELL_METACHARACTERS.test(trimmed)) return false;
-  if (CONTENT_READING_SAFE_VERBS.test(trimmed) && SENSITIVE_PATH_PATTERN.test(trimmed)) return false;
-  return true;
-}
+// Every exec call reaches semantic review. Shell names are not a dependable
+// safety boundary: aliases/functions, executable-name prefixes and mutating
+// options can turn an apparently harmless verb into a consequential action.
 // process's "list"/"poll"/"log" actions only read state (running
 // processes, output so far); everything else (write/send-keys/paste/
 // submit/kill/clear/remove) drives or tears down a live process.
@@ -94,16 +64,6 @@ export function browserActKind(params: unknown): string {
 }
 // Non-"act" browser actions that themselves navigate, transfer files,
 // change browser/profile state, or otherwise reach beyond a passive read.
-const BROWSER_INTERACTIVE_ACTIONS = new Set([
-  "start", "stop", "importprofile", "open", "navigate", "focus", "close",
-  "download", "waitfordownload", "upload", "dialog", "emulate", "pdf",
-]);
-// action:"act" kinds that interact with or mutate the page. "batch" is
-// included since it can itself nest any of these.
-const BROWSER_INTERACTIVE_ACT_KINDS = new Set([
-  "batch", "click", "clickCoords", "type", "press", "hover",
-  "scrollIntoView", "drag", "select", "fill", "resize", "evaluate", "close",
-]);
 // act-kinds whose params carry the actual value being written into the
 // page (a form field's contents, typed text, a selected option). These
 // get a context-only pre-check first — see before_tool_call in index.ts.
@@ -111,8 +71,32 @@ export const BROWSER_VALUE_ACT_KINDS = new Set(["fill", "type", "select"]);
 
 function shouldAnalyzeBrowser(params: unknown): boolean {
   const action = browserAction(params);
-  if (action === "act") return BROWSER_INTERACTIVE_ACT_KINDS.has(browserActKind(params));
-  return BROWSER_INTERACTIVE_ACTIONS.has(action);
+  if (action === "act") {
+    const kind = browserActKind(params);
+    // A timer/selector wait is passive, but OpenClaw's wait.fn evaluates
+    // JavaScript in the page. Unknown kinds default to review.
+    if (kind === "wait") return typeof (params as Record<string, unknown>)?.fn === "string"
+      && String((params as Record<string, unknown>).fn).trim().length > 0;
+    return true;
+  }
+  // Only explicitly enumerated observation actions skip review. Unknown
+  // browser actions default to review like unknown top-level tools do.
+  if (PASSIVE_BROWSER_ACTIONS.has(action)) return false;
+  return true;
+}
+
+const PASSIVE_BROWSER_ACTIONS = new Set([
+  "snapshot", "screenshot", "text", "tabs", "console", "requests", "errors", "status", "doctor",
+]);
+
+// A local read is normally passive, but credential-bearing paths deserve the
+// same task/reviewer boundary as any other sensitive operation. This is a
+// conservative name-based backstop; OS permissions remain authoritative.
+const SENSITIVE_READ_PATH = /(?:^|[\\/])(?:\.ssh|\.aws|\.azure|\.gnupg|\.kube)(?:[\\/]|$)|(?:^|[\\/])(?:\.env(?:\.[^\\/]*)?|credentials?|secrets?\.json|id_(?:rsa|dsa|ecdsa|ed25519)|\.npmrc|\.pypirc|netrc)(?:$|[\\/])/i;
+
+function readsSensitivePath(params: unknown): boolean {
+  const p = (params as Record<string, unknown> | undefined)?.path;
+  return typeof p === "string" && SENSITIVE_READ_PATH.test(p.replace(/\\/g, "/"));
 }
 
 export function shouldAnalyze(toolName: string, params: unknown): boolean {
@@ -122,13 +106,13 @@ export function shouldAnalyze(toolName: string, params: unknown): boolean {
     return !SAFE_COMPUTER_ACTIONS.has(action);
   }
   if (toolName === "exec") {
-    const cmd = String((params as Record<string, unknown>)?.command ?? "");
-    return !isSafeExecCommand(cmd);
+    return true;
   }
   if (toolName === "process") {
     const action = String((params as Record<string, unknown>)?.action ?? "");
     return !SAFE_PROCESS_ACTIONS.has(action);
   }
+  if (toolName === "read" && readsSensitivePath(params)) return true;
   if (ALWAYS_ANALYZE.has(toolName)) return true;
   return !PASSIVE_TOOLS.has(toolName);
 }

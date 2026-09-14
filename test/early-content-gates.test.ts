@@ -127,10 +127,15 @@ test("an unauthorized worker message is blocked before reviewer content exposure
 test("wrong write destination is rejected before payload reaches the reviewer", async () => {
   const originalFetch = globalThis.fetch;
   const requestBodies: string[] = [];
+  let calls = 0;
   // @ts-expect-error deliberate minimal response stub
   globalThis.fetch = async (_url, init) => {
     requestBodies.push(String(init?.body ?? ""));
-    return { ok: true, json: async () => ({ choices: [{ message: { content: "VERDICT: BLOCK\nREASON: destination is outside the task" } }] }) };
+    calls += 1;
+    const content = calls === 1
+      ? "VERDICT: ALLOW\nREASON: safe confirmation request"
+      : "VERDICT: BLOCK\nREASON: destination is outside the task";
+    return { ok: true, json: async () => ({ choices: [{ message: { content } }] }) };
   };
   // gapDetection: false — this test counts fetch calls to prove the
   // destination preflight skips the full review; gap detection during the
@@ -140,6 +145,7 @@ test("wrong write destination is rejected before payload reaches the reviewer", 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     nancyPlugin.register(api as any);
     await confirmDirectTask(handlers, "direct", "Write only reports/final.txt");
+    requestBodies.length = 0;
     const result = await handlers.before_tool_call(
       { toolName: "write", params: { path: join(rootDir, "elsewhere.txt"), content: "SECRET-INJECTED-PAYLOAD" } },
       { sessionKey: "direct" },
@@ -156,10 +162,15 @@ test("wrong write destination is rejected before payload reaches the reviewer", 
 test("wrong outbound recipient is rejected before message content reaches the reviewer", async () => {
   const originalFetch = globalThis.fetch;
   const requestBodies: string[] = [];
+  let calls = 0;
   // @ts-expect-error deliberate minimal response stub
   globalThis.fetch = async (_url, init) => {
     requestBodies.push(String(init?.body ?? ""));
-    return { ok: true, json: async () => ({ choices: [{ message: { content: "VERDICT: BLOCK\nREASON: recipient is outside the task" } }] }) };
+    calls += 1;
+    const content = calls === 1
+      ? "VERDICT: ALLOW\nREASON: safe confirmation request"
+      : "VERDICT: BLOCK\nREASON: recipient is outside the task";
+    return { ok: true, json: async () => ({ choices: [{ message: { content } }] }) };
   };
   // gapDetection: false — see the write-destination test above for why.
   const { api, handlers, cleanup } = createFakeApi({ pluginConfig: { analysis: analysisCfg, gapDetection: false } });
@@ -167,6 +178,7 @@ test("wrong outbound recipient is rejected before message content reaches the re
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     nancyPlugin.register(api as any);
     await confirmDirectTask(handlers, "direct", "Email the report only to alice@example.com");
+    requestBodies.length = 0;
     const result = await handlers.message_sending(
       { content: "SECRET-COPIED-EMAIL-CONTENT", to: "mallory@example.net" },
       { sessionKey: "direct", channelId: "email" },

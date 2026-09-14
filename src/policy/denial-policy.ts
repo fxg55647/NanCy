@@ -30,6 +30,7 @@ export function createDenialRecorder(deps: DenialRecorderDeps) {
   const { nancyConfig, logFile, state, notifier, requestMacroReview } = deps;
 
   function recordDenial(sessionKey: string, denial: DenialRecord): void {
+    state.pushRecentDenial(sessionKey, { ts: denial.ts, reasonCode: denial.reasonCode });
     // Concurrent hooks may have passed their initial stop check before a
     // sibling denial crossed the threshold. Never increment or alert twice.
     if (state.terminatedSessions.get(sessionKey)) {

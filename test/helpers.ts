@@ -16,15 +16,16 @@ export type FakeApi = {
     agent: { resolveAgentWorkspaceDir: (config: unknown, agentId: string) => string };
     subagent: Record<string, AnyFn>;
   };
-  on: (event: string, handler: AnyFn) => void;
+  on: (event: string, handler: AnyFn, opts?: { timeoutMs?: number }) => void;
 };
 
 export function createFakeApi(opts: {
   pluginConfig?: Record<string, unknown>;
   subagent?: Record<string, AnyFn>;
-} = {}): { api: FakeApi; handlers: Record<string, AnyFn>; rootDir: string; cleanup: () => void } {
+} = {}): { api: FakeApi; handlers: Record<string, AnyFn>; hookOptions: Record<string, { timeoutMs?: number } | undefined>; rootDir: string; cleanup: () => void } {
   const rootDir = mkdtempSync(join(tmpdir(), "nancy-test-"));
   const handlers: Record<string, AnyFn> = {};
+  const hookOptions: Record<string, { timeoutMs?: number } | undefined> = {};
   const api: FakeApi = {
     rootDir,
     pluginConfig: opts.pluginConfig ?? {},
@@ -41,11 +42,12 @@ export function createFakeApi(opts: {
         getSessionMessages: async () => ({ messages: [] }),
       },
     },
-    on(event, handler) {
+    on(event, handler, hookOpts) {
       handlers[event] = handler;
+      hookOptions[event] = hookOpts;
     },
   };
-  return { api, handlers, rootDir, cleanup: () => rmSync(rootDir, { recursive: true, force: true }) };
+  return { api, handlers, hookOptions, rootDir, cleanup: () => rmSync(rootDir, { recursive: true, force: true }) };
 }
 
 // Polls a real timer (mocks here resolve immediately, so this settles fast)

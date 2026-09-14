@@ -13,6 +13,8 @@ export type RecentReasoning = { ts: string; text: string };
 export function createSessionState() {
   const recentCallsBySession = new Map<string, RecentCall[]>();
   const recentReasoningBySession = new Map<string, RecentReasoning[]>();
+  const recentDenialsBySession = new Map<string, Array<{ ts: string; reasonCode: string }>>();
+  const sessionTokens = new Map<string, symbol>();
 
   // Cron-run correlation, keyed by sessionKey. before_tool_call's ctx
   // (PluginHookToolContext) and message_sending's ctx (PluginHookMessageContext)
@@ -53,6 +55,29 @@ export function createSessionState() {
 
   function touchActivity(sessionKey: string): void {
     lastActivityMs.set(sessionKey, Date.now());
+  }
+
+  function getSessionToken(sessionKey: string | undefined): symbol {
+    const key = sessionKey ?? UNKNOWN_SESSION_KEY;
+    let token = sessionTokens.get(key);
+    if (!token) { token = Symbol(key); sessionTokens.set(key, token); }
+    return token;
+  }
+
+  function isSessionTokenCurrent(sessionKey: string | undefined, token: symbol): boolean {
+    return sessionTokens.get(sessionKey ?? UNKNOWN_SESSION_KEY) === token;
+  }
+
+  function pushRecentDenial(sessionKey: string | undefined, entry: { ts: string; reasonCode: string }): void {
+    const key = sessionKey ?? UNKNOWN_SESSION_KEY;
+    const entries = recentDenialsBySession.get(key) ?? [];
+    entries.push(entry);
+    if (entries.length > 20) entries.shift();
+    recentDenialsBySession.set(key, entries);
+  }
+
+  function getRecentDenials(sessionKey: string | undefined) {
+    return recentDenialsBySession.get(sessionKey ?? UNKNOWN_SESSION_KEY) ?? [];
   }
 
   function consumeInfoLookupQuota(sessionKey: string | undefined, limit: number, windowMs: number): boolean {
@@ -112,6 +137,8 @@ export function createSessionState() {
     const key = sessionKey ?? UNKNOWN_SESSION_KEY;
     recentCallsBySession.delete(key);
     recentReasoningBySession.delete(key);
+    recentDenialsBySession.delete(key);
+    sessionTokens.delete(key);
     callCounters.delete(key);
     macroReviewThresholds.delete(key);
     terminatedSessions.delete(key);
@@ -135,6 +162,10 @@ export function createSessionState() {
     macroReviewPending,
     lastActivityMs,
     touchActivity,
+    getSessionToken,
+    isSessionTokenCurrent,
+    pushRecentDenial,
+    getRecentDenials,
     isCronTrigger,
     pushRecentCall,
     pushRecentReasoning,

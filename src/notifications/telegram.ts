@@ -4,12 +4,16 @@ import type { NancyConfig } from "../config.ts";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 
 export async function telegramAlert(botToken: string, chatId: string, text: string): Promise<void> {
-  await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+  const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "Markdown" }),
+    // Plain text cannot be rejected because an untrusted model-generated
+    // reason happens to contain malformed Telegram Markdown.
+    body: JSON.stringify({ chat_id: chatId, text }),
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
+  const data = await res.json().catch(() => null) as { ok?: boolean; description?: string } | null;
+  if (!res.ok || data?.ok === false) throw new Error(`Telegram API error ${res.status}: ${data?.description ?? "unknown response"}`);
 }
 
 // Telegram's message text cap is 4096 chars; leave headroom for the
@@ -39,7 +43,9 @@ export function createTelegramNotifier(api: OpenClawPluginApi, nancyConfig: Nanc
 
   function sendAlert(text: string): void {
     if (!botToken || !chatId) return;
-    telegramAlert(botToken, chatId, text).catch(() => { });
+    telegramAlert(botToken, chatId, text).catch((err) => {
+      console.warn(`[nancy] ⚠️  Telegram alert delivery failed: ${String(err)}`);
+    });
   }
 
   // Live notification for every block, including CLARIFY (which also fails

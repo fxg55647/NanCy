@@ -3,12 +3,19 @@
 // not treat a timeout as completion and delete the worker session out from
 // under a run that may still be executing — it should keep waiting (up to
 // WORKER_MAX_WAIT_ATTEMPTS) and only skip cleanup if it truly never settles.
-import { test } from "node:test";
+import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import nancyPlugin from "../src/index.ts";
 import { createFakeApi, waitFor, confirmationContent } from "./helpers.ts";
+
+const originalFetch = globalThis.fetch;
+before(() => {
+  globalThis.fetch = async () => new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "VERDICT: ALLOW\nREASON: safe confirmation request" } }] }));
+});
+after(() => { globalThis.fetch = originalFetch; });
+const workerPluginConfig = { workerAgentId: "worker", analysis: { provider: "openai" as const, model: "test-model", apiKey: "x" }, gapDetection: false };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function confirmTask(handlers: Record<string, any>, sessionKey: string, id: string, description: string): Promise<void> {
@@ -22,7 +29,7 @@ test("worker: retries through timeouts and only cleans up once waitForRun report
   const results = [{ status: "timeout" }, { status: "timeout" }, { status: "ok" }];
   let deleted = false;
   const { api, handlers, rootDir, cleanup } = createFakeApi({
-    pluginConfig: { workerAgentId: "worker" },
+    pluginConfig: workerPluginConfig,
     subagent: {
       run: async () => ({ runId: "run-1" }),
       waitForRun: async () => results[Math.min(waitCalls++, results.length - 1)],
@@ -48,7 +55,7 @@ test("worker: never deletes the session if the run never stops timing out", asyn
   let waitCalls = 0;
   let deleted = false;
   const { api, handlers, rootDir, cleanup } = createFakeApi({
-    pluginConfig: { workerAgentId: "worker" },
+    pluginConfig: workerPluginConfig,
     subagent: {
       run: async () => ({ runId: "run-2" }),
       waitForRun: async () => { waitCalls++; return { status: "timeout" }; },

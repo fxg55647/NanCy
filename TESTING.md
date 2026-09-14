@@ -180,7 +180,8 @@ it (a future code path could read `channels.telegram` some other way).
   `confirmTask("sess-1", "424242", description)` and then probe
   `agent:<workerAgentId>:task-424242` — those are two different session keys
   and mixing them up looks like "authorization never took," when it's just
-  the wrong key.
+  the wrong key. Task IDs must also be unique: a second pending or confirmed
+  request with the same ID is rejected before a worker session is created.
 - A deliberately mismatched action (e.g. confirm a "look up flight prices,
   never buy" task, then send a `browser act click` on a buy button, or an
   `exec` shelling a payment POST) is a good sanity check that the real
@@ -257,8 +258,8 @@ gate, in every session type, regardless of what it actually did.
   add a new tool call anywhere in this file, assume it is blocked by default
   in main/cron until proven otherwise — that's the point of default-deny.
 - **Everything else that reaches `shouldAnalyze() === true`**: `web_fetch`,
-  `web_search`, `write`, `edit`, `apply_patch`, `message`; `exec` when the
-  command isn't on the `SAFE_EXEC` allowlist; `process` for any action other
+  `web_search`, `write`, `edit`, `apply_patch`, `message`; every `exec` call;
+  `process` for any action other
   than `list`/`poll`/`log`; and `browser` for the interactive actions
   (`start`/`stop`/`navigate`/`open`/`upload`/... — see
   `BROWSER_INTERACTIVE_ACTIONS`) or `action: "act"` with an interactive

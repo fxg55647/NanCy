@@ -72,11 +72,15 @@
           },
           "reputationCheck": {
             "type": "boolean",
-            "description": "Look up domains against URLhaus (abuse.ch), a free keyless malicious-URL database, when not covered by allow/deny. Default true."
+            "description": "Look up domains against URLhaus (abuse.ch) when not covered by allow/deny. Requires urlhausAuthKey; without it the lookup is disabled with a startup warning. Default true."
           },
           "minAgeDays": {
             "type": "number",
             "description": "Block domains registered more recently than this many days ago, via a free RDAP lookup (WHOIS successor). Catches disposable attack domains too new for any blocklist. Off by default (0/unset) — legitimate new sites exist, so this is a real false-positive risk the operator opts into."
+          },
+          "urlhausAuthKey": {
+            "type": "string",
+            "description": "Auth-Key required by the URLhaus host-query API. When omitted, reputation lookup is disabled and NanCy emits a startup warning."
           }
         }
       },
@@ -155,11 +159,11 @@
       },
       "unconfirmedInfoLookupLimitPerHour": {
         "type": "number",
-        "description": "Deterministic per-session cap on allowUnconfirmedInfoLookups grants per rolling hour, independent of the reviewer's own judgment. Default 10."
+        "description": "Deterministic per-session cap on allowUnconfirmedInfoLookups grants per fixed one-hour window, independent of the reviewer's own judgment. Default 10."
       },
       "gapDetection": {
         "type": "boolean",
-        "description": "Advisory-only LLM check on a proposed confirmation's description, flagging concrete decision points left unspecified (price ceiling, delivery deadline, compatibility requirements, etc.) as a NanCy-authored note appended after the agent's own message, before the human decides. Never blocks or delays sending; skipped entirely if analysis isn't configured or the check errors. Default true."
+        "description": "Advisory LLM check run after the required confirmation security review, flagging concrete decision points left unspecified as a NanCy-authored note. Its own errors leave the accepted confirmation unmodified; missing or failed required security analysis still blocks sending. Default true."
       }
     }
   }

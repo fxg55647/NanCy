@@ -5,12 +5,19 @@
 // "current" record, so one worker's before_tool_call could end up seeing
 // (or granting) the other's authorization. It's now an in-memory map keyed
 // by the exact worker session key NanCy itself generates per task.
-import { test } from "node:test";
+import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import nancyPlugin from "../src/index.ts";
 import { createFakeApi, confirmationContent, waitFor } from "./helpers.ts";
+
+const originalFetch = globalThis.fetch;
+before(() => {
+  globalThis.fetch = async () => new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "VERDICT: ALLOW\nREASON: safe confirmation request" } }] }));
+});
+after(() => { globalThis.fetch = originalFetch; });
+const workerPluginConfig = { workerAgentId: "worker", analysis: { provider: "openai" as const, model: "test-model", apiKey: "x" }, gapDetection: false };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function confirmTask(handlers: Record<string, any>, sessionKey: string, id: string, description: string): Promise<void> {
@@ -27,7 +34,7 @@ function lastBeforeToolCall(rootDir: string, sessionKey: string): any {
 
 test("worker: two concurrent tasks on the same workerAgentId never see each other's authorization", async () => {
   const { api, handlers, rootDir, cleanup } = createFakeApi({
-    pluginConfig: { workerAgentId: "worker" },
+    pluginConfig: workerPluginConfig,
     subagent: {
       run: async () => ({ runId: "run-pending" }),
       // Never resolves — keeps both worker "runs" genuinely concurrent
@@ -58,7 +65,7 @@ test("worker: two concurrent tasks on the same workerAgentId never see each othe
 
 test("worker: a session key is not re-authorized after its task's worker session completes", async () => {
   const { api, handlers, rootDir, cleanup } = createFakeApi({
-    pluginConfig: { workerAgentId: "worker" },
+    pluginConfig: workerPluginConfig,
     subagent: {
       run: async () => ({ runId: "run-1" }),
       waitForRun: async () => ({ status: "ok" }),
@@ -84,7 +91,7 @@ test("worker: a session key is not re-authorized after its task's worker session
 test("worker: refuses to spawn at all when the task-record write fails", async () => {
   let runCalled = false;
   const { api, handlers, rootDir, cleanup } = createFakeApi({
-    pluginConfig: { workerAgentId: "worker" },
+    pluginConfig: workerPluginConfig,
     subagent: {
       run: async () => { runCalled = true; return { runId: "run-x" }; },
       waitForRun: async () => ({ status: "ok" }),
@@ -120,7 +127,7 @@ test("worker: refuses to spawn at all when the task-record write fails", async (
 
 test("worker: task authorization is revoked on spawn error (subagent.run throws)", async () => {
   const { api, handlers, rootDir, cleanup } = createFakeApi({
-    pluginConfig: { workerAgentId: "worker" },
+    pluginConfig: workerPluginConfig,
     subagent: {
       run: async () => { throw new Error("spawn failed"); },
       waitForRun: async () => ({ status: "ok" }),
@@ -146,7 +153,7 @@ test("worker: task authorization survives a wait-exhausted (never confirmed done
   let waitCalls = 0;
   let deleteCalled = false;
   const { api, handlers, rootDir, cleanup } = createFakeApi({
-    pluginConfig: { workerAgentId: "worker" },
+    pluginConfig: workerPluginConfig,
     subagent: {
       run: async () => ({ runId: "run-timeout" }),
       waitForRun: async () => { waitCalls++; return { status: "timeout" }; },

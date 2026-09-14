@@ -3,19 +3,30 @@
 // record NanCy itself writes under tasks/). Complements
 // confirmation-protocol.test.ts (pure parser unit tests) and
 // confirmation-send-failure.test.ts (delivery-failure invalidation).
-import { test } from "node:test";
+import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import nancyPlugin from "../src/index.ts";
 import { createFakeApi, confirmationContent } from "./helpers.ts";
 
+const analysisCfg = { provider: "openai" as const, model: "test-model", apiKey: "x" };
+const originalFetch = globalThis.fetch;
+before(() => {
+  globalThis.fetch = async () => new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "VERDICT: ALLOW\nREASON: safe confirmation request" } }] }));
+});
+after(() => { globalThis.fetch = originalFetch; });
+
+function createConfirmationApi() {
+  return createFakeApi({ pluginConfig: { analysis: analysisCfg, gapDetection: false } });
+}
+
 function auditRecordPath(rootDir: string, id: string): string {
   return join(rootDir, "workspace", "main", "tasks", `${id}.json`);
 }
 
-test("confirmation: denied reply grants nothing and is logged with the actual reply text", async () => {
-  const { api, handlers, rootDir, cleanup } = createFakeApi();
+test("confirmation: denied reply grants nothing and logs only bounded reply metadata", async () => {
+  const { api, handlers, rootDir, cleanup } = createConfirmationApi();
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     nancyPlugin.register(api as any);
@@ -26,7 +37,8 @@ test("confirmation: denied reply grants nothing and is logged with the actual re
     assert.equal(existsSync(auditRecordPath(rootDir, "100001")), false, "a denied confirmation must never be written");
     const log = readFileSync(join(rootDir, "nancy.log"), "utf8");
     assert.ok(log.includes('"confirmation_denied"'));
-    assert.ok(log.includes('"reply":"no thanks"'), "the actual reply text should be captured for audit, not just 'denied'");
+    assert.ok(log.includes('"replyLen":9'));
+    assert.ok(!log.includes("no thanks"), "a denial does not need to persist arbitrary inbound content");
     assert.ok(!log.includes('"confirmation_granted"'));
   } finally {
     cleanup();
@@ -34,7 +46,7 @@ test("confirmation: denied reply grants nothing and is logged with the actual re
 });
 
 test("confirmation: an expired reply (past the TTL) is not granted even though it says 'y'", async () => {
-  const { api, handlers, rootDir, cleanup } = createFakeApi();
+  const { api, handlers, rootDir, cleanup } = createConfirmationApi();
   const realNow = Date.now;
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -58,7 +70,7 @@ test("confirmation: an expired reply (past the TTL) is not granted even though i
 });
 
 test("confirmation: a second request before the first is answered supersedes it — only the newest can be confirmed", async () => {
-  const { api, handlers, rootDir, cleanup } = createFakeApi();
+  const { api, handlers, rootDir, cleanup } = createConfirmationApi();
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     nancyPlugin.register(api as any);
@@ -77,7 +89,7 @@ test("confirmation: a second request before the first is answered supersedes it 
 });
 
 test("confirmation: a reply threaded to a different message does not consume the pending confirmation", async () => {
-  const { api, handlers, rootDir, cleanup } = createFakeApi();
+  const { api, handlers, rootDir, cleanup } = createConfirmationApi();
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     nancyPlugin.register(api as any);
@@ -101,7 +113,7 @@ test("confirmation: a reply threaded to a different message does not consume the
 });
 
 test("confirmation: a malformed near-miss of the fixed template is rejected outright, not silently sent unrecorded", async () => {
-  const { api, handlers, rootDir, cleanup } = createFakeApi();
+  const { api, handlers, rootDir, cleanup } = createConfirmationApi();
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     nancyPlugin.register(api as any);
@@ -125,7 +137,7 @@ test("confirmation: a malformed near-miss of the fixed template is rejected outr
 });
 
 test("confirmation: an empty description is rejected outright, not accepted as an authorization anchor", async () => {
-  const { api, handlers, rootDir, cleanup } = createFakeApi();
+  const { api, handlers, rootDir, cleanup } = createConfirmationApi();
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     nancyPlugin.register(api as any);
@@ -144,12 +156,7 @@ test("confirmation: an empty description is rejected outright, not accepted as a
   }
 });
 
-// Gap detection (see test/gap-detection.test.ts for the feature itself)
-// needs a reviewer model to run at all — with none configured, a vague
-// description full of unfilled placeholders is still granted exactly as
-// written, the same as before that feature existed. This documents that
-// specific fallback, not an absence of the feature.
-test("confirmation: with no analysis configured, a vague description is still granted as-is (gap detection has nothing to run it with)", async () => {
+test("confirmation: with no analysis configured, the outbound authorization request fails closed", async () => {
   const { api, handlers, rootDir, cleanup } = createFakeApi();
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -157,12 +164,11 @@ test("confirmation: with no analysis configured, a vague description is still gr
     const vague = "Buy tickets to <DESTINATION> for <NUMBER> people using [PAYMENT METHOD], then let them know somehow.";
     const content = confirmationContent("100007", vague);
     const result = await handlers.message_sending({ content }, { sessionKey: "sess-vague", channelId: "test" });
-    assert.equal(result, undefined, "no analysis is configured, so gap detection has no reviewer model to consult and is skipped");
+    assert.equal(result?.cancel, true);
+    assert.match(result.cancelReason, /analysis is not configured/);
 
     handlers.message_received({ content: "y" }, { sessionKey: "sess-vague" });
-    assert.equal(existsSync(auditRecordPath(rootDir, "100007")), true, "NanCy currently grants this exactly as written — see README feature #2's gap-detection status");
-    const record = JSON.parse(readFileSync(auditRecordPath(rootDir, "100007"), "utf8"));
-    assert.equal(record.description, vague);
+    assert.equal(existsSync(auditRecordPath(rootDir, "100007")), false);
   } finally {
     cleanup();
   }

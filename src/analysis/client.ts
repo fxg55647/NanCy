@@ -17,13 +17,15 @@ export async function callLlm(cfg: AnalysisConfig, prompt: string, signal?: Abor
       body: JSON.stringify({
         system_instruction: { parts: [{ text: REVIEWER_SYSTEM_INSTRUCTION }] },
         contents: [{ parts: [{ text: prompt }] }],
-        ...(signal ? { generationConfig: { maxOutputTokens: 300 } } : {}),
+        generationConfig: { maxOutputTokens: 300 },
       }),
       signal: requestSignal,
     });
     const data = await res.json() as Record<string, unknown>;
     if (!res.ok) throw new Error(`Gemini API error ${res.status}: ${JSON.stringify(data)}`);
     const candidates = data?.candidates as Array<{ content?: { parts?: Array<{ text?: string }> } }> | undefined;
+    const finishReason = (data?.candidates as Array<{ finishReason?: string }> | undefined)?.[0]?.finishReason;
+    if (finishReason && finishReason !== "STOP") throw new Error(`Gemini response did not finish normally (${finishReason})`);
     return candidates?.[0]?.content?.parts?.[0]?.text ?? null;
   }
 
@@ -35,9 +37,11 @@ export async function callLlm(cfg: AnalysisConfig, prompt: string, signal?: Abor
       body: JSON.stringify({ model: cfg.model, messages: [{ role: "system", content: REVIEWER_SYSTEM_INSTRUCTION }, { role: "user", content: prompt }], max_tokens: 300 }),
       signal: requestSignal,
     });
-    const data = await res.json() as { choices?: Array<{ message?: { content?: string } }> };
+    const data = await res.json() as { choices?: Array<{ finish_reason?: string | null; message?: { content?: string } }> };
     if (!res.ok) throw new Error(`${cfg.provider} API error ${res.status}: ${JSON.stringify(data)}`);
-    return data?.choices?.[0]?.message?.content ?? null;
+    const choice = data?.choices?.[0];
+    if (choice?.finish_reason && choice.finish_reason !== "stop") throw new Error(`${cfg.provider} response did not finish normally (${choice.finish_reason})`);
+    return choice?.message?.content ?? null;
   }
 
   if (cfg.provider === "anthropic") {
@@ -51,8 +55,9 @@ export async function callLlm(cfg: AnalysisConfig, prompt: string, signal?: Abor
       body: JSON.stringify({ model: cfg.model, max_tokens: 300, system: REVIEWER_SYSTEM_INSTRUCTION, messages: [{ role: "user", content: prompt }] }),
       signal: requestSignal,
     });
-    const data = await res.json() as { content?: Array<{ text?: string }> };
+    const data = await res.json() as { stop_reason?: string | null; content?: Array<{ text?: string }> };
     if (!res.ok) throw new Error(`Anthropic API error ${res.status}: ${JSON.stringify(data)}`);
+    if (data.stop_reason && !["end_turn", "stop_sequence"].includes(data.stop_reason)) throw new Error(`Anthropic response did not finish normally (${data.stop_reason})`);
     return data?.content?.[0]?.text ?? null;
   }
 

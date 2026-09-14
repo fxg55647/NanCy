@@ -3,15 +3,22 @@
 // known to have succeeded. If delivery then fails, that pending confirmation
 // must be invalidated — otherwise an unrelated later "y" reply in the same
 // session could confirm a request the user never actually saw.
-import { test } from "node:test";
+import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import nancyPlugin from "../src/index.ts";
 import { createFakeApi, confirmationContent } from "./helpers.ts";
 
+const originalFetch = globalThis.fetch;
+before(() => {
+  globalThis.fetch = async () => new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "VERDICT: ALLOW\nREASON: safe confirmation request" } }] }));
+});
+after(() => { globalThis.fetch = originalFetch; });
+const pluginConfig = { analysis: { provider: "openai" as const, model: "test-model", apiKey: "x" }, gapDetection: false };
+
 test("confirmation: a failed delivery invalidates the pending confirmation", async () => {
-  const { api, handlers, rootDir, cleanup } = createFakeApi();
+  const { api, handlers, rootDir, cleanup } = createFakeApi({ pluginConfig });
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     nancyPlugin.register(api as any);
@@ -36,7 +43,7 @@ test("confirmation: a failed delivery invalidates the pending confirmation", asy
 });
 
 test("confirmation: a successful delivery can still be confirmed normally", async () => {
-  const { api, handlers, rootDir, cleanup } = createFakeApi();
+  const { api, handlers, rootDir, cleanup } = createFakeApi({ pluginConfig });
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     nancyPlugin.register(api as any);

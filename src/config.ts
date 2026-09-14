@@ -32,6 +32,7 @@ export interface DomainConfig {
   deny?: string[];
   reputationCheck?: boolean;
   minAgeDays?: number;
+  urlhausAuthKey?: string;
 }
 
 export interface NancyConfig {
@@ -72,15 +73,10 @@ export interface NancyConfig {
   // message that would have been ALLOWED, or that never needed analysis at
   // all, is hard-blocked/canceled at the last moment instead, with the real
   // verdict/reason recorded in the block message and in
-  // nancy.log/nancy-analysis.log. The ONE exception is NanCy's own
-  // fixed-format confirmation-request prompt (see parseConfirmationRequest):
-  // it is always sent for real, in test mode or not, because it's the only
-  // way to drive the confirm/deny dance end-to-end, it's a rigid
-  // NanCy-recognized template rather than arbitrary agent-authored content,
-  // and it is sent for real in production too — so exempting it adds no new
-  // real-world exposure test mode wouldn't already have. Every other
-  // outbound send — including the "analysis not configured" and
-  // "analysis failed" cases, which normally fail open — is dry-run only.
+  // nancy.log/nancy-analysis.log. NanCy's fixed-format confirmation request
+  // is sent for real so the confirm/deny flow can be exercised, but its
+  // description and destination first pass the configured security review.
+  // Every other outbound send, including missing/failed analysis, is blocked.
   // Lets a task be run against NanCy end-to-end to see exactly what it would
   // decide. Default false.
   testMode?: boolean;
@@ -99,7 +95,7 @@ export interface NancyConfig {
   // backstop. Default true.
   allowUnconfirmedInfoLookups?: boolean;
   // Deterministic per-session cap on allowUnconfirmedInfoLookups grants per
-  // rolling hour, independent of the reviewer's own judgment — a backstop in
+  // fixed one-hour window, independent of the reviewer's own judgment — a backstop in
   // case the probabilistic reviewer is wrong repeatedly, per
   // SECURITY-PHILOSOPHY.md's "limit how many X can be performed within a
   // given period." Default 10.
@@ -111,9 +107,9 @@ export interface NancyConfig {
   // requirements, etc. — see confirmation/gap-detection.ts). Detected gaps
   // are appended as a clearly separate NanCy-authored note after the
   // agent's own fixed-template message, before the human decides whether to
-  // approve it. Skipped entirely (fails open, sends unmodified) when
-  // analysis isn't configured or the check itself errors — this is a
-  // judgment aid, not a security gate. Default true.
+  // approve it. An error in this advisory call sends the already
+  // security-reviewed confirmation unmodified. Missing/failed required
+  // confirmation analysis still blocks. Default true.
   gapDetection?: boolean;
 }
 
