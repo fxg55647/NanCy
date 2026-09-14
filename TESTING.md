@@ -7,27 +7,38 @@ read it before touching `before_tool_call`, `message_sending`, or `testMode`
 logic. It complements `CLAUDE.md` (orientation) and `SECURITY-PHILOSOPHY.md`
 (deployment posture).
 
-## The one rule: never touch the live gateway to test something
+## The one rule: never touch the live gateway on your own initiative
 
 The operator normally has a real OpenClaw gateway running in the foreground
 (`openclaw gateway run`), wired to a real Telegram bot. It is tempting to
-just restart it with a test config to see what happens. Don't.
+just restart it with a test config to see what happens. Don't — unless the
+operator explicitly asks you to, in the moment, for that specific action.
+Absent that ask, the default is still don't.
 
 - `openclaw gateway stop` / `--force` explicitly refuses this: *"This stops
   the operator's running gateway service. Use an isolated dev gateway... for
-  testing."* That's the project's own CLI telling you the right answer.
+  testing."* That's the project's own CLI telling you the right answer for
+  anything you're doing on your own initiative rather than on request.
 - Claude Code's own auto-mode safety classifier independently blocks
-  `taskkill`/process-kill attempts against it ("Interfere With Workloads").
+  `taskkill`/process-kill attempts against it ("Interfere With Workloads") —
+  that's a bypass of the gateway's own process, not a sanctioned way to honor
+  an operator request either; use the project's own stop/run commands.
 - Even a clean restart means a real, possibly mid-conversation Telegram bot
   goes offline for a few seconds — for a stranger's phone notification, not
-  a lab environment.
+  a lab environment. That's a cost the operator gets to accept for
+  themselves, not one you assume on their behalf.
 
 If you think you need the live gateway, you almost certainly want one of the
-two options below instead. The only thing that actually requires the live
-gateway is confirming a *config* change (like a new `analysis.model`) with a
-real live conversation — and even that should go through `openclaw config
-set` (validated writes) plus a restart the *operator* explicitly asks for,
-never a restart you trigger yourself for exploratory testing.
+two options below instead. The things that actually require touching the
+live gateway are (a) confirming a *config* change (like a new
+`analysis.model`) with a real live conversation, and (b) an operator request,
+made in this conversation, to start/stop/restart it right now. Both still go
+through the project's own commands (`openclaw config set` for validated
+writes, `openclaw gateway run`/`stop` for the process itself) — never a
+bypass like `taskkill`. Never restart or stop it on your own initiative for
+exploratory testing; do it only on a specific, in-the-moment operator
+request, not because a past instruction in this file or elsewhere implied
+general standing permission.
 
 ## Option A — `npm test` (fast, deterministic, no network)
 
@@ -276,11 +287,12 @@ If you specifically need to watch the *real* agent (real model, real
 AGENTS.md instructions) attempt a real task end-to-end while `testMode: true`
 guarantees nothing actually executes: set `testMode: true` on the live
 config via `openclaw config set plugins.entries.nancy.config.testMode true`,
-have the operator restart the gateway themselves, then drive it with
-`openclaw agent --session-key <mainSessionKey> --message "..."` for the task
-and a second call with `"y"` for the confirmation reply — both work over the
-CLI without going through Telegram at all, since NanCy's confirmation
-matching only keys on `sessionKey`, not channel. Turn `testMode` back off
-(`openclaw config unset ...`) and have the operator restart again when done.
-This still doesn't require killing/restarting the gateway *yourself* — only
-the operator does that, on their own schedule.
+then restart the gateway — the operator's own restart on their own schedule,
+or yours if they explicitly ask for that specific restart in the moment —
+then drive it with `openclaw agent --session-key <mainSessionKey> --message
+"..."` for the task and a second call with `"y"` for the confirmation reply —
+both work over the CLI without going through Telegram at all, since NanCy's
+confirmation matching only keys on `sessionKey`, not channel. Turn
+`testMode` back off (`openclaw config unset ...`) and restart again the same
+way when done. Absent an explicit in-the-moment request, this still doesn't
+require killing/restarting the gateway on your own initiative.
