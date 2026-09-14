@@ -55,7 +55,7 @@ footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border
 <div class="nav-body">
 <div class="brand">NanCy SSIL</div>
 <div class="brand-sub"><a href="https://github.com/fxg55647/NanCy">GitHub ↗</a></div>
-<div class="nav-group"><h2>Overview</h2><ul><li><a href="index.html">NanCy SSIL</a></li><li><a href="claude.html" aria-current="page">CLAUDE</a></li><li><a href="how-agents-go-wrong.html">HOW AGENTS GO WRONG</a></li><li><a href="incidents.html">INCIDENTS</a></li><li><a href="misconceptions.html">MISCONCEPTIONS</a></li><li><a href="nancy-policy.html">NANCY POLICY</a></li><li><a href="related-work.html">RELATED WORK</a></li><li><a href="security-philosophy.html">SECURITY PHILOSOPHY</a></li><li><a href="testing.html">TESTING</a></li></ul></div><div class="nav-group"><h2>Architecture</h2><ul><li><a href="architecture/debate-review.html">Debate Review</a></li><li><a href="architecture/denial-escalation-and-clarification.html">Denial Escalation And Clarification</a></li><li><a href="architecture/gap-detection.html">Gap Detection</a></li><li><a href="architecture/policy-precedence.html">Policy Precedence</a></li></ul></div><div class="nav-group"><h2>Audits</h2><ul><li><a href="audits/2026-09-14-security-review.html">2026 09 14 Security Review</a></li></ul></div>
+<div class="nav-group"><h2>Overview</h2><ul><li><a href="index.html">NanCy SSIL</a></li><li><a href="claude.html" aria-current="page">CLAUDE</a></li><li><a href="how-agents-go-wrong.html">HOW AGENTS GO WRONG</a></li><li><a href="incidents.html">INCIDENTS</a></li><li><a href="misconceptions.html">MISCONCEPTIONS</a></li><li><a href="nancy-policy.html">NANCY POLICY</a></li><li><a href="related-work.html">RELATED WORK</a></li><li><a href="security-philosophy.html">SECURITY PHILOSOPHY</a></li><li><a href="testing.html">TESTING</a></li></ul></div><div class="nav-group"><h2>Architecture</h2><ul><li><a href="architecture/arweave-integrity-anchoring.html">Arweave Integrity Anchoring</a></li><li><a href="architecture/debate-review.html">Debate Review</a></li><li><a href="architecture/denial-escalation-and-clarification.html">Denial Escalation And Clarification</a></li><li><a href="architecture/gap-detection.html">Gap Detection</a></li><li><a href="architecture/policy-precedence.html">Policy Precedence</a></li></ul></div><div class="nav-group"><h2>Audits</h2><ul><li><a href="audits/2026-09-14-security-review.html">2026 09 14 Security Review</a></li></ul></div>
 </div>
 </nav>
 <main>
@@ -84,11 +84,12 @@ footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border
 <li><code>src/notifications/telegram.ts</code> — Telegram alerting/status pushes, block-alert debounce.</li>
 <li><code>src/browser/snapshot.ts</code> — <code>fetchBrowserSnapshot()</code> and snapshot file naming/pruning — DOM Biopsy (feature #5).</li>
 <li><code>src/logging/logger.ts</code> — <code>logDecision()</code>, log rotation.</li>
+<li><code>src/integrity/arweave-anchor.ts</code> — optional changed-only SHA-256 manifests for logs/control files, application-level Arweave chaining, confirmation checks, protected local state, and manifest verification.</li>
 <li><code>src/state.ts</code> — per-session state: bounded recent call/reasoning/denial ring buffers, cron-trigger correlation, call/denial counters, macro-review serialization, session-generation tokens, termination flags.</li>
-<li>Config schema lives in <code>openclaw.plugin.json</code> (<code>analysis</code>, <code>browser</code>, <code>domains</code>, <code>macroReview</code>, <code>limits</code>, <code>mainSessionKey</code>, <code>mainSessionIdleMinutes</code>, <code>workerAgentId</code>, <code>telegramAlerts</code>, <code>testMode</code>).</li>
+<li>Config schema lives in <code>openclaw.plugin.json</code> (<code>analysis</code>, <code>browser</code>, <code>domains</code>, <code>arweaveAnchoring</code>, <code>macroReview</code>, <code>limits</code>, <code>mainSessionKey</code>, <code>mainSessionIdleMinutes</code>, <code>workerAgentId</code>, <code>telegramAlerts</code>, <code>testMode</code>).</li>
 </ul>
 <h2 id="feature-status-see-readme-key-technical-features-for-full-detail">Feature status (see README §&quot;Key Technical Features&quot; for full detail)</h2>
-<p>✅ implemented: SSIL one-shot analysis (#1), intent confirmation &amp; gap detection (#2), Domain Border Control (#3), main/worker session split (#7, optional), behavioral review plus deterministic denial termination (#8), permanent operator policy (#9), write-protection for core files (#6).</p>
+<p>✅ implemented: SSIL one-shot analysis (#1), intent confirmation &amp; gap detection (#2), Domain Border Control (#3), main/worker session split (#7, optional), behavioral review plus deterministic denial termination (#8), permanent operator policy (#9), write-protection for core files (#6), and optional Arweave integrity anchoring (#11).</p>
 <p>🧭 not implemented: Contextual Scrambler / dedicated prompt-injection defense (#4).</p>
 <p>⚠️ lighter than described: DOM Biopsy (#5) — page-level snapshot only, not element-level HTML parsing.</p>
 <h2 id="recent-focus-see-git-log-for-detail">Recent focus (see <code>git log</code> for detail)</h2>
@@ -98,6 +99,8 @@ footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border
 <li><code>nancy.log</code> — general plugin log</li>
 <li><code>nancy-analysis.log</code> — LLM analysis verdicts</li>
 <li><code>snapshots/</code> — browser DOM snapshots</li>
+<li><code>nancy-integrity.log</code> — Arweave submission/confirmation journal; deliberately excluded from its own source set to avoid self-triggering anchors</li>
+<li><code>.nancy-integrity/anchor-state.json</code> — protected local head of the application-level Arweave chain</li>
 </ul>
 <h2 id="docs-map">Docs map</h2>
 <ul>
@@ -112,12 +115,13 @@ footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border
 <li><code>docs/architecture/gap-detection.md</code> — design rationale for the advisory unspecified-decision-point check (feature #2&#39;s gap-detection half): prompt design, failure modes, config, and known limitations</li>
 <li><code>docs/architecture/policy-precedence.md</code> — exactly which decision prompts explicitly name a standing-policy violation as its own BLOCK trigger (vs. relying on context alone), and which deliberately don&#39;t yet — read before editing any <code>Use BLOCK when...</code> sentence in <code>src/index.ts</code></li>
 <li><code>docs/architecture/debate-review.md</code> — experimental optional FOR/AGAINST/JUDGE full review, implemented in <code>src/analysis/debate.ts</code>; <code>analysis.debateMode</code> defaults to off. Every mode fails closed on full-review errors, including outbound messages. Comparative real-model evaluation remains outstanding.</li>
+<li><code>docs/architecture/arweave-integrity-anchoring.md</code> — permanent hash-manifest source set, 15-minute changed-only cadence, chain/confirmation semantics, key handling, privacy limits, and verification</li>
 <li><code>docs/audits/2026-09-14-security-review.md</code> — repository-wide security review, reproduced findings, corrections, and verification evidence.</li>
 <li><code>TESTING.md</code> — how to test changes: <code>npm test</code> (mocked, fast) vs. a standalone harness against the real reviewer model (genuine verdicts, zero live-gateway risk), the confirmed-task file format, and why the live gateway must never be stopped/restarted for testing</li>
 <li><code>EVAL-RESULTS.md</code> — generated report from <code>scripts/run-eval.mts</code> (a fixed, hand-written scenario set in <code>scripts/eval-scenarios.json</code>, run against the real configured reviewer model via the Option B pattern). Regenerate with <code>node --experimental-strip-types scripts/run-eval.mts</code>; re-run whenever <code>analysis.model</code> or the policy/analysis modules change, to catch reviewer-behavior regressions.</li>
 </ul>
 
-<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit 0c7398a. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
+<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit 87a784c. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
 </main>
 </div>
 </body>

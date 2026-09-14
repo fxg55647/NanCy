@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arweave Integrity Anchoring — NanCy SSIL</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1a1a1a; --muted: #5b6472; --border: #e2e5ea;
+  --accent: #7c3aed; --code-bg: #f4f4f7; --nav-bg: #fafafa;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14161c; --fg: #eef0f4; --muted: #9aa3b2; --border: #2a2e38;
+    --accent: #b794f6; --code-bg: #1c1f27; --nav-bg: #191b22;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); }
+.layout { display: flex; min-height: 100vh; }
+nav.sidebar { width: 260px; flex-shrink: 0; background: var(--nav-bg); border-right: 1px solid var(--border); padding: 24px 16px; }
+nav.sidebar h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 20px 0 6px; }
+nav.sidebar ul { list-style: none; margin: 0; padding: 0; }
+nav.sidebar li a { display: block; padding: 4px 8px; border-radius: 6px; text-decoration: none; color: var(--fg); font-size: 14px; }
+nav.sidebar li a[aria-current="page"] { background: var(--accent); color: #fff; }
+nav.sidebar li a:hover { background: var(--border); }
+.brand { font-weight: 700; font-size: 18px; margin-bottom: 4px; }
+.brand-sub { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+main { flex: 1; min-width: 0; padding: 40px clamp(16px, 5vw, 64px); max-width: 860px; }
+main h1:first-child { margin-top: 0; }
+pre { background: var(--code-bg); padding: 14px 16px; overflow-x: auto; border-radius: 8px; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; overflow-x: auto; display: block; }
+th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+blockquote { border-left: 3px solid var(--accent); margin: 0; padding: 0 16px; color: var(--muted); }
+img { max-width: 100%; }
+footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+#nav-toggle { display: none; }
+.nav-toggle-label { display: none; }
+@media (max-width: 800px) {
+  .layout { display: block; }
+  nav.sidebar { width: auto; border-right: none; border-bottom: 1px solid var(--border); }
+  #nav-toggle:not(:checked) ~ .layout nav.sidebar .nav-body { display: none; }
+  .nav-toggle-label { display: block; padding: 16px; cursor: pointer; font-weight: 600; }
+}
+</style>
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="layout">
+<nav class="sidebar">
+<label class="nav-toggle-label" for="nav-toggle">☰ Docs menu</label>
+<div class="nav-body">
+<div class="brand">NanCy SSIL</div>
+<div class="brand-sub"><a href="https://github.com/fxg55647/NanCy">GitHub ↗</a></div>
+<div class="nav-group"><h2>Overview</h2><ul><li><a href="../index.html">NanCy SSIL</a></li><li><a href="../claude.html">CLAUDE</a></li><li><a href="../how-agents-go-wrong.html">HOW AGENTS GO WRONG</a></li><li><a href="../incidents.html">INCIDENTS</a></li><li><a href="../misconceptions.html">MISCONCEPTIONS</a></li><li><a href="../nancy-policy.html">NANCY POLICY</a></li><li><a href="../related-work.html">RELATED WORK</a></li><li><a href="../security-philosophy.html">SECURITY PHILOSOPHY</a></li><li><a href="../testing.html">TESTING</a></li></ul></div><div class="nav-group"><h2>Architecture</h2><ul><li><a href="arweave-integrity-anchoring.html" aria-current="page">Arweave Integrity Anchoring</a></li><li><a href="debate-review.html">Debate Review</a></li><li><a href="denial-escalation-and-clarification.html">Denial Escalation And Clarification</a></li><li><a href="gap-detection.html">Gap Detection</a></li><li><a href="policy-precedence.html">Policy Precedence</a></li></ul></div><div class="nav-group"><h2>Audits</h2><ul><li><a href="../audits/2026-09-14-security-review.html">2026 09 14 Security Review</a></li></ul></div>
+</div>
+</nav>
+<main>
+<h1 id="arweave-integrity-anchoring">Arweave Integrity Anchoring</h1>
+<p>Status: <strong>implemented, optional, and disabled by default.</strong> This feature provides tamper evidence for NanCy&#39;s local audit material. It does not prevent a compromised machine from changing files, and it does not place raw logs, source code, task descriptions, or secrets on a public network.</p>
+<h2 id="what-problem-it-addresses">What problem it addresses</h2>
+<p>Local logs are useful only while an investigator can trust that they were not rewritten after an incident. Read-only permissions make alteration harder, but an administrator, compromised host process, stolen credential, or offline disk edit may still change both a protected file and the local record of what happened.</p>
+<p>NanCy periodically computes SHA-256 hashes of its audit logs and control-plane files. It publishes a small JSON manifest containing those hashes to Arweave. A later investigator can hash the retained local files and compare the result with a timestamped, independently stored record. Changing even one byte produces a different hash.</p>
+<p>Arweave transactions are signed data transactions. The network accepts them through <code>POST /tx</code>; the transaction ID is derived from the signature, and a successful submission response means the node received the transaction rather than proving it has already been mined. NanCy therefore records <code>submitted</code> separately from <code>confirmed</code> and, by default, does not extend its application-level chain until the gateway reports the previous transaction mined. See the <a href="https://docs.arweave.org/developers/arweave-node-server/http-api">Arweave HTTP API</a> and the official <a href="https://github.com/ArweaveTeam/arweave-js">arweave-js client</a>.</p>
+<h2 id="default-source-set">Default source set</h2>
+<p>One manifest covers the following material when it exists:</p>
+<ul>
+<li><code>nancy.log</code>, <code>nancy-analysis.log</code>, and their single rotated generations;</li>
+<li>all files under NanCy&#39;s <code>src/</code> directory;</li>
+<li><code>openclaw.plugin.json</code> and <code>NANCY-POLICY.md</code>;</li>
+<li><code>package.json</code> and <code>package-lock.json</code>;</li>
+<li>the main workspace&#39;s <code>AGENTS.md</code>, <code>IDENTITY.md</code>, and <code>MEMORY.md</code>;</li>
+<li>the configured worker workspace&#39;s corresponding files; and</li>
+<li>NanCy-owned <code>tasks/*.json</code> confirmation audit records, unless <code>includeTaskRecords</code> is false.</li>
+</ul>
+<p>The private wallet JWK is explicitly excluded. Browser snapshots are also excluded: they may contain sensitive page data, change frequently, and are short-lived diagnostic artifacts rather than the durable authorization record.</p>
+<p>For an ordinary file, NanCy records a logical label, status, byte count, and SHA-256. For a log that is still growing, it reads the size first and hashes exactly that many bytes. The result therefore proves a precise prefix even if another log line is appended during hashing. Missing and unreadable files are represented explicitly. Directory symlinks are not followed; a symlink leaf is represented by a hash of its link target so that it cannot silently pull an unrelated tree into the public manifest.</p>
+<h2 id="manifest-and-chain">Manifest and chain</h2>
+<p>The uploaded data is compact JSON with this shape:</p>
+<pre><code class="language-json">{
+  &quot;schema&quot;: &quot;nancy-integrity-anchor/v1&quot;,
+  &quot;createdAt&quot;: &quot;2026-09-14T12:00:00.000Z&quot;,
+  &quot;sequence&quot;: 42,
+  &quot;previous&quot;: {
+    &quot;transactionId&quot;: &quot;...&quot;,
+    &quot;manifestSha256&quot;: &quot;...&quot;
+  },
+  &quot;sourceSetSha256&quot;: &quot;...&quot;,
+  &quot;entries&quot;: [
+    {
+      &quot;label&quot;: &quot;logs/nancy.log&quot;,
+      &quot;status&quot;: &quot;present&quot;,
+      &quot;bytes&quot;: 18420,
+      &quot;sha256&quot;: &quot;...&quot;
+    }
+  ]
+}
+</code></pre>
+<p>Entries are sorted by logical label. <code>sourceSetSha256</code> commits to the exact ordered entry list. The SHA-256 of the complete JSON is stored in the transaction tag <code>NanCy-Manifest-SHA256</code>. Each manifest names the preceding transaction and its complete-manifest hash, producing an application-level chain independent of Arweave&#39;s own transaction anchors.</p>
+<p>Local chain state is kept in <code>.nancy-integrity/anchor-state.json</code>. Before network submission, the exact manifest is atomically placed in <code>.nancy-integrity/pending-anchor.json</code>. If the process loses an uncertain submission response or crashes before advancing the chain head, the next attempt retries that exact manifest. This may produce an orphaned duplicate transaction, but it cannot silently skip the prepared evidence or create a disconnected canonical chain. A malformed state or pending file stops publication instead of silently discarding uncertainty.</p>
+<p>NanCy blocks direct <code>write</code>, <code>edit</code>, and <code>apply_patch</code> calls to the integrity directory, the audit logs, and the separate <code>nancy-integrity.log</code> journal. It also deterministically blocks direct agent access to a configured <code>walletJwkPath</code>, including host-derived paths from shell commands. OS permissions remain necessary because plugin checks cannot constrain programs, environment-variable exposure, aliases, or shell indirection outside the paths OpenClaw reports to its hooks.</p>
+<h2 id="cadence">Cadence</h2>
+<p>The default interval is <strong>15 minutes</strong>. At each interval NanCy recomputes the source-set hash and skips publication if nothing changed. It also requests an anchor after gateway startup and before a clean shutdown. These requests still skip unchanged data.</p>
+<p>Fifteen minutes is a practical default for small manifests: it limits the normal unauthenticated activity window without publishing continuously. An active gateway can produce up to 96 transactions per day, and actual fees are dynamic. Operators should choose a longer interval when that volume, wallet operations, or network traffic is undesirable. The allowed range is one minute to 24 hours.</p>
+<p>The default <code>requirePreviousConfirmation: true</code> prevents the next manifest from extending a link that the gateway still reports as pending. This can delay later anchors during network congestion, which is preferable to presenting a chain of merely accepted submissions as a confirmed permanent record. Submission and confirmation transitions are written to <code>nancy-integrity.log</code>.</p>
+<h2 id="configuration-and-key-handling">Configuration and key handling</h2>
+<pre><code class="language-json">&quot;arweaveAnchoring&quot;: {
+  &quot;enabled&quot;: true,
+  &quot;intervalMinutes&quot;: 15,
+  &quot;gatewayUrl&quot;: &quot;https://arweave.net&quot;,
+  &quot;walletJwk&quot;: {
+    &quot;source&quot;: &quot;env&quot;,
+    &quot;id&quot;: &quot;NANCY_ARWEAVE_WALLET_JWK&quot;
+  },
+  &quot;includeTaskRecords&quot;: true,
+  &quot;anchorOnStartup&quot;: true,
+  &quot;anchorOnShutdown&quot;: true,
+  &quot;requirePreviousConfirmation&quot;: true
+}
+</code></pre>
+<p><code>NANCY_ARWEAVE_WALLET_JWK</code> must contain the complete private RSA JWK JSON. An absolute <code>walletJwkPath</code> may be used instead, but it should be outside all agent workspaces, readable only by the gateway account, and backed up securely. The configured key signs transactions and can spend that wallet&#39;s AR balance. Use a dedicated, minimally funded wallet; never reuse a high-value wallet or place its JWK in the repository.</p>
+<p>HTTP gateways are rejected except on loopback for localnet testing. The standard gateway defaults to <code>https://arweave.net</code>. The gateway response, public wallet address, transaction ID, sequence, and manifest hash are journaled; the private key is never logged.</p>
+<h2 id="verification">Verification</h2>
+<p>Verify one transaction:</p>
+<pre><code class="language-bash">npm run verify:arweave -- &lt;transaction-id&gt;
+</code></pre>
+<p>Walk and verify the complete linked history ending at that transaction:</p>
+<pre><code class="language-bash">npm run verify:arweave -- &lt;transaction-id&gt; --chain
+</code></pre>
+<p>The verifier first requires the gateway&#39;s status endpoint to report every inspected transaction as confirmed. It then downloads the transaction tags and manifest, confirms the complete JSON hash, validates the source-set hash and entry schema, and checks every previous transaction ID, manifest hash, and sequence number. Use <code>--gateway=https://gateway.example</code> to select another gateway.</p>
+<p>This proves that the retrieved manifests form the published chain. To test a retained file, hash exactly the recorded number of bytes and compare it with the corresponding entry. A full operational verifier that automatically maps remote labels onto an archived host filesystem is future work.</p>
+<h2 id="privacy-and-limitations">Privacy and limitations</h2>
+<p>Hashes are not encryption. The manifest permanently reveals its publication time, wallet, source labels, file sizes, task-record filenames, and the frequency with which the protected source set changed. A hash of predictable low-entropy content can also confirm a guess about that content. Disable task-record inclusion or the entire feature when this metadata is unacceptable.</p>
+<p>An anchor proves only that somebody controlling the signing wallet published a particular set of hashes. It does not prove that the logs were complete, that their events were truthful, that the host was uncompromised before hashing, or that NanCy intercepted every consequential action. An attacker who controls the machine and wallet before an anchor can publish hashes of altered evidence. Keep the wallet outside agent reach and combine this feature with remote log shipping, least privilege, host monitoring, and backups.</p>
+<p>Anchoring failures do not stop normal NanCy operation. Making network availability or wallet balance a prerequisite for every agent action would turn an optional audit mechanism into a broad availability failure. Errors are instead made visible in the dedicated journal and retried at the next trigger.</p>
+<h2 id="test-coverage">Test coverage</h2>
+<p><code>test/integrity-anchor.test.ts</code> covers deterministic hashing, content exclusion, manifest verification, changed-only publication, confirmation gating, chain links, exact-manifest outbox recovery, corrupt-state refusal, hard blocking of direct writes to audit logs/local chain state, and denial of agent reads from a configured wallet file. Network calls and wallet signing are not exercised by the normal test suite.</p>
+
+<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit 87a784c. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
+</main>
+</div>
+</body>
+</html>

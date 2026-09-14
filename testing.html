@@ -55,7 +55,7 @@ footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border
 <div class="nav-body">
 <div class="brand">NanCy SSIL</div>
 <div class="brand-sub"><a href="https://github.com/fxg55647/NanCy">GitHub ↗</a></div>
-<div class="nav-group"><h2>Overview</h2><ul><li><a href="index.html">NanCy SSIL</a></li><li><a href="claude.html">CLAUDE</a></li><li><a href="how-agents-go-wrong.html">HOW AGENTS GO WRONG</a></li><li><a href="incidents.html">INCIDENTS</a></li><li><a href="misconceptions.html">MISCONCEPTIONS</a></li><li><a href="nancy-policy.html">NANCY POLICY</a></li><li><a href="related-work.html">RELATED WORK</a></li><li><a href="security-philosophy.html">SECURITY PHILOSOPHY</a></li><li><a href="testing.html" aria-current="page">TESTING</a></li></ul></div><div class="nav-group"><h2>Architecture</h2><ul><li><a href="architecture/debate-review.html">Debate Review</a></li><li><a href="architecture/denial-escalation-and-clarification.html">Denial Escalation And Clarification</a></li><li><a href="architecture/gap-detection.html">Gap Detection</a></li><li><a href="architecture/policy-precedence.html">Policy Precedence</a></li></ul></div><div class="nav-group"><h2>Audits</h2><ul><li><a href="audits/2026-09-14-security-review.html">2026 09 14 Security Review</a></li></ul></div>
+<div class="nav-group"><h2>Overview</h2><ul><li><a href="index.html">NanCy SSIL</a></li><li><a href="claude.html">CLAUDE</a></li><li><a href="how-agents-go-wrong.html">HOW AGENTS GO WRONG</a></li><li><a href="incidents.html">INCIDENTS</a></li><li><a href="misconceptions.html">MISCONCEPTIONS</a></li><li><a href="nancy-policy.html">NANCY POLICY</a></li><li><a href="related-work.html">RELATED WORK</a></li><li><a href="security-philosophy.html">SECURITY PHILOSOPHY</a></li><li><a href="testing.html" aria-current="page">TESTING</a></li></ul></div><div class="nav-group"><h2>Architecture</h2><ul><li><a href="architecture/arweave-integrity-anchoring.html">Arweave Integrity Anchoring</a></li><li><a href="architecture/debate-review.html">Debate Review</a></li><li><a href="architecture/denial-escalation-and-clarification.html">Denial Escalation And Clarification</a></li><li><a href="architecture/gap-detection.html">Gap Detection</a></li><li><a href="architecture/policy-precedence.html">Policy Precedence</a></li></ul></div><div class="nav-group"><h2>Audits</h2><ul><li><a href="audits/2026-09-14-security-review.html">2026 09 14 Security Review</a></li></ul></div>
 </div>
 </nav>
 <main>
@@ -229,6 +229,13 @@ follow-up action too, if it looks like a continuation of a page/flow it
 just blocked (e.g. still typing into a field on what it believes is a
 checkout page) — that&#39;s the reviewer using state, not a bug in the harness.</li>
 </ul>
+<h2 id="arweave-integrity-anchoring">Arweave integrity anchoring</h2>
+<p>The normal suite never reads a wallet or contacts Arweave. <code>test/integrity-anchor.test.ts</code> injects a fake publisher and covers exact-prefix hashing, raw-content exclusion, deterministic manifests, changed-only publication, confirmation gating, chain links, corrupt-state refusal, and direct-write protection for logs/local chain state.</p>
+<p>After an operator deliberately enables <code>arweaveAnchoring</code> with a dedicated funded wallet, inspect <code>nancy-integrity.log</code> for <code>arweave_anchor_submitted</code> followed by <code>arweave_anchor_confirmed</code>. A gateway accepting a transaction is not the same as it being mined. The verifier requires confirmed transactions, verifies their tags and complete manifest hashes, and can optionally walk the application-level history:</p>
+<pre><code class="language-bash">npm run verify:arweave -- &lt;transaction-id&gt;
+npm run verify:arweave -- &lt;transaction-id&gt; --chain
+</code></pre>
+<p>Do not put a real JWK in a test fixture, repository file, command line, or captured test output. Use an environment SecretInput or an absolute OS-protected path outside every agent workspace. See <code>docs/architecture/arweave-integrity-anchoring.md</code> for localnet/gateway rules and what the resulting proof does and does not establish.</p>
 <h2 id="reusable-scenario-eval-scriptsrun-evalmts">Reusable scenario eval (<code>scripts/run-eval.mts</code>)</h2>
 <p>A fixed, hand-written set of scenarios (<code>scripts/eval-scenarios.json</code>) — protected-path writes, the main/cron default-deny gate, the no-confirmed-task hard block, Domain Border Control, and genuine intent-match/mismatch/ambiguous cases — runnable end-to-end against the real configured reviewer model with the exact Option B safety properties above (<code>testMode: true</code>, live gateway never touched, no channels/telegram config passed into the harness). Run it and it (re)writes <code>EVAL-RESULTS.md</code> at the repo root:</p>
 <pre><code>node --experimental-strip-types scripts/run-eval.mts
@@ -323,7 +330,7 @@ confirmation matching only keys on <code>sessionKey</code>, not channel. Turn
 way when done. Absent an explicit in-the-moment request, this still doesn&#39;t
 require killing/restarting the gateway on your own initiative.</p>
 
-<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit 0c7398a. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
+<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit 87a784c. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
 </main>
 </div>
 </body>
