@@ -1,5 +1,9 @@
 # TODO
 
+## Debate-style triple-pass review — design proposal, not implemented
+
+See `docs/architecture/debate-review.md`: an optional FOR/AGAINST/JUDGE analysis mode (adapted from `fxg55647/leima`'s `neutral_witness.py`) for the per-call reviewer. Not started — activation strategy (always-on vs. CLARIFY-escalation-only) and cost/latency tradeoffs need a decision before any code.
+
 ## Moduloi src/index.ts — ✅ tehty
 
 `src/index.ts` pilkottiin alla olevan suuntaviivan mukaisesti. Lopullinen
