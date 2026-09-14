@@ -3,7 +3,7 @@ import { appendFileSync, renameSync, statSync, unlinkSync } from "fs";
 // Single-generation rotation: renames the file aside once it crosses the size
 // cap. The startup call handles old files; logDecision also invokes it before
 // every decision write so a long-lived gateway cannot grow without bound.
-const MAX_LOG_BYTES = 20 * 1024 * 1024;
+export const MAX_LOG_BYTES = 20 * 1024 * 1024;
 export function rotateLogIfLarge(path: string): void {
   try {
     if (statSync(path).size > MAX_LOG_BYTES) {
