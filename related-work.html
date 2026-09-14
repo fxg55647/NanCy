@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RELATED WORK — NanCy SSIL</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1a1a1a; --muted: #5b6472; --border: #e2e5ea;
+  --accent: #7c3aed; --code-bg: #f4f4f7; --nav-bg: #fafafa;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14161c; --fg: #eef0f4; --muted: #9aa3b2; --border: #2a2e38;
+    --accent: #b794f6; --code-bg: #1c1f27; --nav-bg: #191b22;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); }
+.layout { display: flex; min-height: 100vh; }
+nav.sidebar { width: 260px; flex-shrink: 0; background: var(--nav-bg); border-right: 1px solid var(--border); padding: 24px 16px; }
+nav.sidebar h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 20px 0 6px; }
+nav.sidebar ul { list-style: none; margin: 0; padding: 0; }
+nav.sidebar li a { display: block; padding: 4px 8px; border-radius: 6px; text-decoration: none; color: var(--fg); font-size: 14px; }
+nav.sidebar li a[aria-current="page"] { background: var(--accent); color: #fff; }
+nav.sidebar li a:hover { background: var(--border); }
+.brand { font-weight: 700; font-size: 18px; margin-bottom: 4px; }
+.brand-sub { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+main { flex: 1; min-width: 0; padding: 40px clamp(16px, 5vw, 64px); max-width: 860px; }
+main h1:first-child { margin-top: 0; }
+pre { background: var(--code-bg); padding: 14px 16px; overflow-x: auto; border-radius: 8px; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; overflow-x: auto; display: block; }
+th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+blockquote { border-left: 3px solid var(--accent); margin: 0; padding: 0 16px; color: var(--muted); }
+img { max-width: 100%; }
+footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+#nav-toggle { display: none; }
+.nav-toggle-label { display: none; }
+@media (max-width: 800px) {
+  .layout { display: block; }
+  nav.sidebar { width: auto; border-right: none; border-bottom: 1px solid var(--border); }
+  #nav-toggle:not(:checked) ~ .layout nav.sidebar .nav-body { display: none; }
+  .nav-toggle-label { display: block; padding: 16px; cursor: pointer; font-weight: 600; }
+}
+</style>
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="layout">
+<nav class="sidebar">
+<label class="nav-toggle-label" for="nav-toggle">☰ Docs menu</label>
+<div class="nav-body">
+<div class="brand">NanCy SSIL</div>
+<div class="brand-sub"><a href="https://github.com/fxg55647/NanCy">GitHub ↗</a></div>
+<div class="nav-group"><h2>Overview</h2><ul><li><a href="index.html">NanCy SSIL</a></li><li><a href="claude.html">CLAUDE</a></li><li><a href="how-agents-go-wrong.html">HOW AGENTS GO WRONG</a></li><li><a href="incidents.html">INCIDENTS</a></li><li><a href="misconceptions.html">MISCONCEPTIONS</a></li><li><a href="nancy-policy.html">NANCY POLICY</a></li><li><a href="related-work.html" aria-current="page">RELATED WORK</a></li><li><a href="security-philosophy.html">SECURITY PHILOSOPHY</a></li><li><a href="testing.html">TESTING</a></li></ul></div><div class="nav-group"><h2>Architecture</h2><ul><li><a href="architecture/debate-review.html">Debate Review</a></li><li><a href="architecture/denial-escalation-and-clarification.html">Denial Escalation And Clarification</a></li><li><a href="architecture/gap-detection.html">Gap Detection</a></li><li><a href="architecture/policy-precedence.html">Policy Precedence</a></li></ul></div><div class="nav-group"><h2>Audits</h2><ul><li><a href="audits/2026-09-14-security-review.html">2026 09 14 Security Review</a></li></ul></div>
+</div>
+</nav>
+<main>
+<h1 id="where-this-fits-as-of-september-2026">Where This Fits (as of September 2026)</h1>
+<p>Is a stateless external model gating an agent&#39;s actions against a locked intent a novel idea? No — by September 2026 this is a widely recognized, increasingly standard pattern in agent security, not something invented here:</p>
+<ul>
+<li><strong>AI Control / trusted monitoring.</strong> Research groups including Redwood Research frame this exact shape — a well-understood &quot;trusted&quot; model reviewing a more capable, potentially subversive &quot;untrusted&quot; agent&#39;s actions and deciding what to allow, flag, or block — as &quot;trusted monitoring.&quot; Active 2026 work in the same space (Ctrl-Z, Bootstrapped Monitoring, Factor(T,U)) is refining the same core idea at frontier scale; NanCy implements a small, single-plugin version of it.</li>
+<li><strong>Intent-based guardrails.</strong> Industry security literature now names this directly: continuously verifying an agent&#39;s actions against approved intent, before execution rather than after, appears in frameworks like Proofpoint&#39;s &quot;Agent Integrity Framework – 2026 Edition&quot; and the AgentDoG diagnostic framework, and in academic work like &quot;The Alignment Gate: Intent and Instruction Guardrails for Agentic AI&quot; (ESANN 2026).</li>
+<li><strong>A limitation this shares with everyone else&#39;s, not a NanCy-specific flaw.</strong> LLM-as-judge intent verification has measured reliability limits — cross-model agreement on &quot;intent resolution&quot; scoring runs around 80%, meaning even well-designed judges disagree with each other roughly one time in five. Treat NanCy&#39;s verdicts as a strong signal, not ground truth — consistent with the &quot;Pragmatism over Perfection&quot; stance in the main <a href="index.html">README</a>.</li>
+<li><strong>What&#39;s more specific here:</strong> the stateless framing (no persisted conversation with the reviewer for an attacker to influence over multiple turns), the confirmation lock being <em>code-enforced</em> rather than merely prompted (the agent cannot write its own &quot;confirmed&quot; record — see feature #2 in the README), review of outbound messages as well as tool calls, a disposable worker session per confirmed task, and a two-stage browser write check that can reject the destination before disclosing the value to the reviewer. NanCy packages these choices as a small plugin for one specific agent framework (OpenClaw) rather than a general authorization platform.</li>
+</ul>
+<p><strong>Closest concrete comparisons found so far:</strong></p>
+<ul>
+<li><strong><a href="https://meta-llama.github.io/PurpleLlama/LlamaFirewall/docs/documentation/scanners/alignment-check">Meta LlamaFirewall&#39;s AlignmentCheck</a></strong> scanner (open-sourced May 2025) is the closest match for the <em>semantic-review</em> half: a separate LLM reasons over an agent&#39;s action trace against the user&#39;s stated objective to catch goal hijacking from prompt injection or misleading tool output. The main structural difference is scope — it reasons over the whole trace it&#39;s given, while NanCy hands its reviewer a deliberately bounded slice each call (the confirmed task file plus a short recent-calls/reasoning window). Whether AlignmentCheck is stateless in the same sense NanCy is isn&#39;t something its public docs confirm either way.</li>
+<li><strong><a href="https://github.com/Claw-Guard/ClawGuard">ClawGuard</a></strong> is the closest match for the <em>task-confirmation</em> half, and happens to be an OpenClaw plugin too: <code>user states objective → ClawGuard derives task-specific access constraints → agent makes a tool call → ClawGuard&#39;s rule engine checks the call against those constraints</code>, ending in allow, deny, or pause-for-human-approval. The key difference: ClawGuard&#39;s actual allow/deny decision is rule-based (allowed commands, paths, domains) against constraints derived once from the goal, not a fresh LLM judgment of each action&#39;s semantics. NanCy is closer to the reverse — an LLM judgment against the locked task on (almost) every call, with rule-based checks reserved for the parts that should never depend on LLM judgment at all (Domain Border Control, protected-file writes).</li>
+<li><strong><a href="https://arxiv.org/abs/2605.02682">Continuous Agent Semantic Authorization (CASA)</a></strong> is a particularly close architectural comparison. It combines deterministic controls with a semantic layer that extracts the subject&#39;s intended task from a multi-turn conversation and checks proposed tools against it at an authorization server. This means the broad combination of deterministic enforcement and semantic task alignment is established prior art. NanCy makes different implementation choices: an explicit code-recorded confirmation instead of task extraction alone, a bounded fresh review for each action, and OpenClaw-specific session and message handling.</li>
+<li><strong><a href="https://arxiv.org/abs/2606.22916">Intent-Governed Access Control (IGAC)</a></strong> treats expressed user intent as a server-side authorization attribute. Its intent certificates, session-scoped policy narrowing, intent-aware tool manifests, and tool/payload consistency checks are a stronger formal authorization treatment of the same underlying problem. NanCy is narrower and lighter: it does not implement cryptographic certificates or monotonic capability narrowing, but anchors its semantic checks to a protected, expiring confirmation record inside an OpenClaw plugin.</li>
+<li><strong><a href="https://openreview.net/pdf?id=kabNlhXQkT">IntentGuard</a></strong> uses a Plan Gate and Tool Gate to compare both an agent&#39;s proposed plan and its tool calls with the original task. It preserves the user&#39;s raw prompt verbatim as the intent reference instead of relying on a model-generated rewrite. That is close to NanCy&#39;s protected anchor and per-action review, but it does not document NanCy&#39;s separate affirmative-confirmation record, outbound-message gate, or disposable worker lifecycle.</li>
+<li><strong><a href="https://arxiv.org/abs/2608.07167">NiyamAI</a></strong> locks permitted tools and constraints into a hashed Intent Contract at session start, then has an isolated Judge validate every tool call before execution and produces a verifiable proof of the judgment. This is the closest match found for NanCy&#39;s locked-intent-plus-independent-judge core, and is stronger on verifiability. Its published description does not include NanCy&#39;s code-mediated <code>y</code>/<code>yes</code> confirmation flow, outbound-message review, or main/worker session split.</li>
+<li><strong><a href="https://arxiv.org/abs/2608.27146">SARA</a></strong> constructs a task-level authorization contract from the user&#39;s original request and checks proposed calls against that authority root while tracking whether later actions were induced by untrusted tool output. Its persistent provenance tracking addresses multi-step prompt injection more directly than NanCy&#39;s short bounded history. It does not describe a separate user-confirmation record, outbound-message enforcement, or disposable task workers.</li>
+<li><strong><a href="https://github.com/CommonstackAI/ClawGuard">CommonstackAI&#39;s ClawGuard</a></strong> is the closest OpenClaw comparison for the LLM-review path: a separate small model compares destructive tool calls with the original user message at <code>before_tool_call</code>. It reviews only calls classified as destructive, while mutating calls pass without LLM review; NanCy aims to review nearly every tool call plus outbound messages and uses a code-owned confirmed-task record rather than passing the original message directly.</li>
+<li><strong><a href="https://google.github.io/adk-docs/plugins/">Google ADK&#39;s plugin/callback system</a></strong> (<code>before_tool_callback</code>) is the general-purpose version of the mechanism underneath both of the above, and NanCy: a hook that can inspect or block a tool call before it runs. ADK ships this as a framework primitive — a task-confirmation lock or an AlignmentCheck/NanCy-style semantic reviewer would have to be built on top of it, not out of the box.</li>
+<li><strong><a href="https://docs.openclaw.ai/releases/2026.8.1/security-and-privacy">OpenClaw&#39;s native security controls</a></strong> now bind approvals to the exact request, command, session, and operator; support per-session permission modes; and carry authority into delegated workers. These overlap substantially with NanCy&#39;s deterministic and worker-isolation layers, but OpenClaw does not provide NanCy&#39;s fresh semantic comparison of nearly every action and outbound message with one protected confirmed-task record.</li>
+<li><strong>Outbound-content guards such as <a href="https://github.com/epic28-ltd/raucle">Raucle</a> and <a href="https://github.com/cdot65/prisma-airs-plugin-openclaw">Prisma AIRS for OpenClaw</a></strong> intercept both <code>before_tool_call</code> and <code>message_sending</code>. They show that covering messages as well as tools is not unique by itself. Their documented checks focus on injection, unsafe arguments, data leakage, malicious content, and configured policies rather than continuously matching both channels to a code-owned confirmed task.</li>
+</ul>
+<p>Put together: NanCy should be understood as a distinctive engineering composition, not as the invention of intent-based runtime authorization. It combines an AlignmentCheck-style semantic reviewer, a code-owned user-confirmed task anchor, deterministic policy boundaries, outbound-message review, and disposable task workers on OpenClaw&#39;s hooks. The individual ideas — and even the broader semantic-plus-deterministic architecture — have clear prior art; the value here is putting this particular set of controls into a compact, inspectable OpenClaw implementation.</p>
+<p><strong>Best-of-our-knowledge claim, as of September 2026:</strong> this review did not find another publicly documented implementation that combines all of the following in one OpenClaw plugin: a confirmation record written only by trusted code from the user&#39;s explicit reply, fresh bounded intent review of both tool calls and outbound messages, deterministic policy boundaries, and a disposable worker session per confirmed task. This is a scoped literature-and-project search result, not proof that no private, unpublished, or differently described implementation exists.</p>
+<p>One recommendation that does come directly out of the AI-control literature: the reviewer model should be genuinely independent of the agent it&#39;s reviewing, to avoid correlated blind spots (or, in the adversarial framing, monitor/agent collusion). NanCy&#39;s <code>analysis</code> config has always been fully independent of whatever model runs the main OpenClaw agent — see <a href="index.html#reviewer-model-independence">Reviewer model independence</a> in the README — and now also warns at startup if the two appear to be the same model.</p>
+<p>Sources: <a href="https://www.redwoodresearch.org/research/ai-control">Redwood Research — AI Control</a> · <a href="https://blog.redwoodresearch.org/p/guide">Ctrl-Z: Controlling AI Agents Through Resampling</a> · <a href="https://arxiv.org/pdf/2606.11998">Bootstrapped Monitoring</a> · <a href="https://arxiv.org/pdf/2512.02157">Factor(T,U)</a> · <a href="https://www.proofpoint.com/us/resources/white-papers/agent-integrity-framework">Agent Integrity Framework – 2026 Edition (Proofpoint)</a> · <a href="https://arxiv.org/html/2601.18491">AgentDoG</a> · <a href="https://www.esann.org/sites/default/files/proceedings/2026/ES2026-172.pdf">The Alignment Gate (ESANN 2026)</a> · <a href="https://www.token.security/blog/how-do-you-verify-an-ai-agents-intent-before-execution">How do you verify an AI agent&#39;s intent before execution? (Token Security)</a> · <a href="https://arxiv.org/pdf/2505.03574">LlamaFirewall: An open source guardrail system for building secure AI agents (arXiv)</a> · <a href="https://meta-llama.github.io/PurpleLlama/LlamaFirewall/docs/documentation/scanners/alignment-check">AlignmentCheck scanner docs</a> · <a href="https://arxiv.org/abs/2604.11790">ClawGuard paper</a> · <a href="https://github.com/Claw-Guard/ClawGuard">ClawGuard implementation</a> · <a href="https://arxiv.org/abs/2605.02682">Continuous Agent Semantic Authorization</a> · <a href="https://arxiv.org/abs/2606.22916">Intent-Governed Access Control</a> · <a href="https://openreview.net/pdf?id=kabNlhXQkT">IntentGuard</a> · <a href="https://arxiv.org/abs/2608.07167">NiyamAI</a> · <a href="https://arxiv.org/abs/2608.27146">SARA</a> · <a href="https://github.com/CommonstackAI/ClawGuard">CommonstackAI ClawGuard</a> · <a href="https://docs.openclaw.ai/releases/2026.8.1/security-and-privacy">OpenClaw security controls</a> · <a href="https://github.com/epic28-ltd/raucle">Raucle</a> · <a href="https://github.com/cdot65/prisma-airs-plugin-openclaw">Prisma AIRS for OpenClaw</a> · <a href="https://google.github.io/adk-docs/plugins/">Google ADK — Plugins</a></p>
+
+<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit 4a3103f. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
+</main>
+</div>
+</body>
+</html>

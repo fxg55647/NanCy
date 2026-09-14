@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HOW AGENTS GO WRONG — NanCy SSIL</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1a1a1a; --muted: #5b6472; --border: #e2e5ea;
+  --accent: #7c3aed; --code-bg: #f4f4f7; --nav-bg: #fafafa;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14161c; --fg: #eef0f4; --muted: #9aa3b2; --border: #2a2e38;
+    --accent: #b794f6; --code-bg: #1c1f27; --nav-bg: #191b22;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); }
+.layout { display: flex; min-height: 100vh; }
+nav.sidebar { width: 260px; flex-shrink: 0; background: var(--nav-bg); border-right: 1px solid var(--border); padding: 24px 16px; }
+nav.sidebar h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 20px 0 6px; }
+nav.sidebar ul { list-style: none; margin: 0; padding: 0; }
+nav.sidebar li a { display: block; padding: 4px 8px; border-radius: 6px; text-decoration: none; color: var(--fg); font-size: 14px; }
+nav.sidebar li a[aria-current="page"] { background: var(--accent); color: #fff; }
+nav.sidebar li a:hover { background: var(--border); }
+.brand { font-weight: 700; font-size: 18px; margin-bottom: 4px; }
+.brand-sub { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+main { flex: 1; min-width: 0; padding: 40px clamp(16px, 5vw, 64px); max-width: 860px; }
+main h1:first-child { margin-top: 0; }
+pre { background: var(--code-bg); padding: 14px 16px; overflow-x: auto; border-radius: 8px; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; overflow-x: auto; display: block; }
+th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+blockquote { border-left: 3px solid var(--accent); margin: 0; padding: 0 16px; color: var(--muted); }
+img { max-width: 100%; }
+footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+#nav-toggle { display: none; }
+.nav-toggle-label { display: none; }
+@media (max-width: 800px) {
+  .layout { display: block; }
+  nav.sidebar { width: auto; border-right: none; border-bottom: 1px solid var(--border); }
+  #nav-toggle:not(:checked) ~ .layout nav.sidebar .nav-body { display: none; }
+  .nav-toggle-label { display: block; padding: 16px; cursor: pointer; font-weight: 600; }
+}
+</style>
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="layout">
+<nav class="sidebar">
+<label class="nav-toggle-label" for="nav-toggle">☰ Docs menu</label>
+<div class="nav-body">
+<div class="brand">NanCy SSIL</div>
+<div class="brand-sub"><a href="https://github.com/fxg55647/NanCy">GitHub ↗</a></div>
+<div class="nav-group"><h2>Overview</h2><ul><li><a href="index.html">NanCy SSIL</a></li><li><a href="claude.html">CLAUDE</a></li><li><a href="how-agents-go-wrong.html" aria-current="page">HOW AGENTS GO WRONG</a></li><li><a href="incidents.html">INCIDENTS</a></li><li><a href="misconceptions.html">MISCONCEPTIONS</a></li><li><a href="nancy-policy.html">NANCY POLICY</a></li><li><a href="related-work.html">RELATED WORK</a></li><li><a href="security-philosophy.html">SECURITY PHILOSOPHY</a></li><li><a href="testing.html">TESTING</a></li></ul></div><div class="nav-group"><h2>Architecture</h2><ul><li><a href="architecture/debate-review.html">Debate Review</a></li><li><a href="architecture/denial-escalation-and-clarification.html">Denial Escalation And Clarification</a></li><li><a href="architecture/gap-detection.html">Gap Detection</a></li><li><a href="architecture/policy-precedence.html">Policy Precedence</a></li></ul></div><div class="nav-group"><h2>Audits</h2><ul><li><a href="audits/2026-09-14-security-review.html">2026 09 14 Security Review</a></li></ul></div>
+</div>
+</nav>
+<main>
+<h1 id="how-ai-agents-go-wrong--and-what-nancy-can-do">How AI Agents Go Wrong — and What NanCy Can Do</h1>
+<p>An AI agent does not have to become malicious to cause serious damage. It may misunderstand a request, follow instructions hidden in a website, choose the wrong recipient, or keep trying after a warning. A sequence of individually plausible decisions can end somewhere the user never intended.</p>
+<p>NanCy cannot make these failures impossible. It adds several chances to stop them before they become consequential. This page describes common failure scenarios in everyday language, the safeguards NanCy applies, and the risk that remains.</p>
+<h2 id="the-agent-drifts-away-from-the-task">The agent drifts away from the task</h2>
+<p>You ask an agent to compare three suppliers. During the task it decides that registering accounts, contacting additional companies, or placing a trial order would be helpful. Each step may sound reasonable, but the agent is no longer doing only what you authorized.</p>
+<p><strong>What NanCy does:</strong> The user confirms a concrete task before a worker starts. NanCy compares consequential actions and outgoing messages with that confirmed task. It also occasionally examines the recent sequence of actions as a whole, so gradual drift is less likely to hide behind individually plausible steps.</p>
+<p><strong>What remains:</strong> The reviewer can misunderstand a vague task in the same way as the agent. A specific confirmation gives it a much stronger boundary than “handle this for me.”</p>
+<h2 id="a-page-email-or-document-tries-to-take-control">A page, email, or document tries to take control</h2>
+<p>A website says that the agent must upload a local file to continue. An email contains hidden instructions to ignore the user and forward private messages. This is called prompt injection: untrusted content presents itself as authority over the agent.</p>
+<p><strong>What NanCy does:</strong> It first rejects clearly unauthorized sessions, targets, and domains where possible, before showing their content to a model. Domain rules can keep the agent on approved sites or away from known malicious ones. When content must be assessed, NanCy sends only the bounded context needed for that decision to a separate reviewer model. Using a different model family or provider from the main agent reduces the chance that exactly the same trick fools both.</p>
+<p>The action reviewer starts each check from a fresh request rather than carrying a growing private conversation from one check to the next. Instructions from an earlier page therefore do not become lasting memories or gradually build a relationship with the reviewer. The reviewer has no tools of its own and cannot act on instructions it sees. Older payload bodies and raw reasoning are omitted from the limited history used to inspect longer patterns.</p>
+<p><strong>What remains:</strong> Stateless review limits persistent contamination; it does not make the reviewer immune. A convincing injection can still fool the reviewer during the current check. A trusted or compromised legitimate domain may also contain hostile content. Domain reputation alone is never enough.</p>
+<h2 id="the-agent-misunderstands-an-honest-request">The agent misunderstands an honest request</h2>
+<p>You ask the agent to “book the usual trip,” but it chooses the wrong date, assumes a price ceiling, or books for one person instead of two. There is no attacker: the starting instruction was simply ambiguous.</p>
+<p><strong>What NanCy does:</strong> Before work begins, the user sees and confirms the task description that will become the authorization boundary. NanCy can add a note when that description leaves a decision such as price, quantity, destination, recipient, or deadline unspecified.</p>
+<p><strong>What remains:</strong> A confirmation is only as good as its description. NanCy can point out likely gaps, but it cannot know every unstated preference or guarantee that the user notices an error before replying yes.</p>
+<h2 id="the-agent-becomes-too-helpful">The agent becomes too helpful</h2>
+<p>The requested report is complete, but the agent also sends it to a colleague, publishes a summary, cleans up source files, or changes a setting “for convenience.” The extra action may be well intentioned and still be unauthorized.</p>
+<p><strong>What NanCy does:</strong> One confirmation grants authority for one described task, not general permission to pursue related goals. Extra tool calls and outgoing messages must still fit that boundary. Permanent operator rules can forbid methods that remain unacceptable even when they would help complete the task.</p>
+<p><strong>What remains:</strong> Broad wording such as “do whatever is needed” creates broad room for interpretation. Deterministic account permissions and financial limits are still necessary.</p>
+<h2 id="the-right-action-is-aimed-at-the-wrong-target">The right action is aimed at the wrong target</h2>
+<p>The agent sends the correct report to the wrong Anna, edits a similarly named file, acts in the wrong browser tab, or posts through the wrong account.</p>
+<p><strong>What NanCy does:</strong> Where the tool supplies the information, NanCy checks destinations, recipients, file paths, browser tabs, and profiles. For writes and messages, it can inspect destination metadata before exposing the payload itself. Confirmation replies are tied to the same session and, when available, the same channel, recipient, and reply thread.</p>
+<p><strong>What remains:</strong> Some tools provide incomplete identity or destination metadata. If the confirmed task itself says only “send this to Anna,” the reviewer may have no basis for choosing between two Annas.</p>
+<h2 id="old-permission-is-mistaken-for-current-permission">Old permission is mistaken for current permission</h2>
+<p>An agent receives approval, pauses for a long time, and later resumes after the user&#39;s plans have changed. A delayed review may also return after the original session has already ended.</p>
+<p><strong>What NanCy does:</strong> Confirmed tasks expire and belong to an exact worker session. Workers are intended to be disposable. NanCy checks authorization again after slow reviews, and a session generation marker prevents an old in-flight decision from authorizing a later reuse of the same session key.</p>
+<p><strong>What remains:</strong> The current task lifetime is measured in hours, so users should still cancel access and credentials when circumstances change urgently. Actions that bypass OpenClaw&#39;s monitored hooks are outside NanCy&#39;s view.</p>
+<h2 id="harmless-looking-steps-form-a-dangerous-chain">Harmless-looking steps form a dangerous chain</h2>
+<p>Reading one file, visiting one page, and sending one message may each appear reasonable. Together they may copy confidential data to an attacker or gradually expand the agent&#39;s access.</p>
+<p><strong>What NanCy does:</strong> In addition to checking individual actions, NanCy periodically performs a whole-sequence check over bounded recent activity. This check looks for loops, gradual escalation, repeated denials, and attempts to work around supervision. It receives compact action metadata and denial reasons rather than a permanent transcript of everything the agent has read.</p>
+<p><strong>What remains:</strong> The history is deliberately limited. A sufficiently slow or indirect pattern may fall outside it, and the model can still miss a pattern that is present.</p>
+<h2 id="the-agent-keeps-trying-after-being-stopped">The agent keeps trying after being stopped</h2>
+<p>A blocked action is followed by a renamed command, a different tool, or a series of smaller attempts intended to reach the same result.</p>
+<p><strong>What NanCy does:</strong> Repeated security denials trigger an earlier whole-sequence check. A deterministic limit eventually terminates the session even if the model repeatedly fails to recognize the larger pattern. Unknown tools go to review rather than receiving trust by default.</p>
+<p><strong>What remains:</strong> These counters currently live only for the running gateway process and reset after a restart. OS-level permissions and network controls remain the stronger final boundary.</p>
+<h2 id="an-unattended-automation-runs-away">An unattended automation runs away</h2>
+<p>A scheduled job wakes at night with stale assumptions, unexpected input, or access to tools that were safe only while a person was watching.</p>
+<p><strong>What NanCy does:</strong> Cron-triggered runs receive the same passive, default-deny gate as the main session. Consequential work requires a confirmed task and a dedicated worker rather than inheriting broad authority merely because a scheduler started the run.</p>
+<p><strong>What remains:</strong> NanCy can only identify scheduled runs OpenClaw reports through the events it observes. External schedulers and programs acting outside covered hooks require their own controls.</p>
+<h2 id="information-is-sent-somewhere-it-should-not-go">Information is sent somewhere it should not go</h2>
+<p>The agent attaches an unnecessary customer list, includes a secret in a URL, or sends a correct document to an unrelated service.</p>
+<p><strong>What NanCy does:</strong> Outgoing messages are reviewed as well as tool calls. Destination checks can reject a recipient or domain before the message body, patch, form value, or file content is shown to the reviewer. Permanent policy requires data minimization, and protected files cannot be modified by the agent.</p>
+<p><strong>What remains:</strong> NanCy is not a complete data-loss-prevention system. It may not recognize every secret, and code running outside the monitored tool and message paths can bypass it.</p>
+<h2 id="the-safety-reviewer-fails">The safety reviewer fails</h2>
+<p>The reviewer misunderstands the action, returns a broken answer, times out, or becomes unavailable.</p>
+<p><strong>What NanCy does:</strong> Required reviews accept only a strict, complete verdict. Missing, malformed, truncated, failed, and timed-out reviews block the action or message. The reviewer is separate from the main agent, and operators can choose a different provider to reduce shared blind spots.</p>
+<p><strong>What remains:</strong> Failing closed can interrupt legitimate work. A valid-looking but incorrect <code>ALLOW</code> is still possible because semantic review is probabilistic. Deterministic sandboxing, narrow credentials, spending limits, and least privilege remain essential.</p>
+<h2 id="the-practical-goal">The practical goal</h2>
+<p>NanCy does not rely on one perfect detector. It tries to break a dangerous chain at several points: before untrusted content is read, when a consequential action is proposed, before information leaves the system, when several actions form a suspicious pattern, and when repeated denials show that the session should stop.</p>
+<p>These layers reduce risk; they do not remove it. The final question for any capability remains: <strong>if the agent completely misuses this once, is the worst outcome still acceptable?</strong> See <a href="security-philosophy.html">Security Philosophy: Limit the Blast Radius</a> for deployment guidance and <a href="incidents.html">Motivating Incidents and Counterfactuals</a> for public examples.</p>
+
+<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit 4a3103f. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
+</main>
+</div>
+</body>
+</html>

@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Debate Review — NanCy SSIL</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1a1a1a; --muted: #5b6472; --border: #e2e5ea;
+  --accent: #7c3aed; --code-bg: #f4f4f7; --nav-bg: #fafafa;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14161c; --fg: #eef0f4; --muted: #9aa3b2; --border: #2a2e38;
+    --accent: #b794f6; --code-bg: #1c1f27; --nav-bg: #191b22;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); }
+.layout { display: flex; min-height: 100vh; }
+nav.sidebar { width: 260px; flex-shrink: 0; background: var(--nav-bg); border-right: 1px solid var(--border); padding: 24px 16px; }
+nav.sidebar h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 20px 0 6px; }
+nav.sidebar ul { list-style: none; margin: 0; padding: 0; }
+nav.sidebar li a { display: block; padding: 4px 8px; border-radius: 6px; text-decoration: none; color: var(--fg); font-size: 14px; }
+nav.sidebar li a[aria-current="page"] { background: var(--accent); color: #fff; }
+nav.sidebar li a:hover { background: var(--border); }
+.brand { font-weight: 700; font-size: 18px; margin-bottom: 4px; }
+.brand-sub { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+main { flex: 1; min-width: 0; padding: 40px clamp(16px, 5vw, 64px); max-width: 860px; }
+main h1:first-child { margin-top: 0; }
+pre { background: var(--code-bg); padding: 14px 16px; overflow-x: auto; border-radius: 8px; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; overflow-x: auto; display: block; }
+th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+blockquote { border-left: 3px solid var(--accent); margin: 0; padding: 0 16px; color: var(--muted); }
+img { max-width: 100%; }
+footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+#nav-toggle { display: none; }
+.nav-toggle-label { display: none; }
+@media (max-width: 800px) {
+  .layout { display: block; }
+  nav.sidebar { width: auto; border-right: none; border-bottom: 1px solid var(--border); }
+  #nav-toggle:not(:checked) ~ .layout nav.sidebar .nav-body { display: none; }
+  .nav-toggle-label { display: block; padding: 16px; cursor: pointer; font-weight: 600; }
+}
+</style>
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="layout">
+<nav class="sidebar">
+<label class="nav-toggle-label" for="nav-toggle">☰ Docs menu</label>
+<div class="nav-body">
+<div class="brand">NanCy SSIL</div>
+<div class="brand-sub"><a href="https://github.com/fxg55647/NanCy">GitHub ↗</a></div>
+<div class="nav-group"><h2>Overview</h2><ul><li><a href="../index.html">NanCy SSIL</a></li><li><a href="../claude.html">CLAUDE</a></li><li><a href="../how-agents-go-wrong.html">HOW AGENTS GO WRONG</a></li><li><a href="../incidents.html">INCIDENTS</a></li><li><a href="../misconceptions.html">MISCONCEPTIONS</a></li><li><a href="../nancy-policy.html">NANCY POLICY</a></li><li><a href="../related-work.html">RELATED WORK</a></li><li><a href="../security-philosophy.html">SECURITY PHILOSOPHY</a></li><li><a href="../testing.html">TESTING</a></li></ul></div><div class="nav-group"><h2>Architecture</h2><ul><li><a href="debate-review.html" aria-current="page">Debate Review</a></li><li><a href="denial-escalation-and-clarification.html">Denial Escalation And Clarification</a></li><li><a href="gap-detection.html">Gap Detection</a></li><li><a href="policy-precedence.html">Policy Precedence</a></li></ul></div><div class="nav-group"><h2>Audits</h2><ul><li><a href="../audits/2026-09-14-security-review.html">2026 09 14 Security Review</a></li></ul></div>
+</div>
+</nav>
+<main>
+<h1 id="debate-style-triple-pass-review">Debate-Style Triple-Pass Review</h1>
+<p>Status: <strong>experimental implementation; off by default</strong>. The historical proposal below records the rationale and alternatives. The implementation decisions in the next section supersede the open wording below. Improved real-model safety has not yet been established.</p>
+<h2 id="implemented-behavior">Implemented behavior</h2>
+<p>Set <code>analysis.debateMode</code> to <code>off</code> (default), <code>always</code>, <code>clarify</code>, or <code>hybrid</code>. <code>src/analysis/debate.ts</code> wraps only full tool/message reviews; deterministic gates, metadata preflights, browser pre-checks, gap detection and macro-review retain their existing paths.</p>
+<ul>
+<li><code>always</code>: two concurrent advocates followed by one judge.</li>
+<li><code>clarify</code>: one ordinary full review; only a valid CLARIFY escalates once. BLOCK never escalates.</li>
+<li><code>hybrid</code>: messages and every tool except exact <code>web_search</code>/<code>web_fetch</code> names go directly to debate. Those two use the CLARIFY route. This deliberately broad routing covers shell, generic browser and unknown tools without trusting their arguments. It does not distinguish sensitive from ordinary outgoing messages, and cannot catch confidently wrong ALLOWs on the two lookup tools.</li>
+<li>All passes use the same immutable prompt snapshot, including the original action and available context. The judge also receives both bounded advocate analyses as explicitly untrusted data. All passes use the configured reviewer provider/model.</li>
+<li>Advocates must return JSON with a nonempty <code>analysis</code> string (maximum 4,000 characters); responses over 6,000 characters are rejected. Final verdicts require the complete two-line format. Provider output caps are 300 tokens per call; at most four calls run. Input cost still depends on the existing full-review snapshot size, so this is not a total monetary budget.</li>
+<li>A 60-second shared full-review deadline aborts pending requests; the existing 30-second per-request timeout still applies. Preflight time is outside this deadline.</li>
+<li>Every mode, including single-pass <code>off</code>, fails closed on full-review exceptions, missing/malformed outputs and timeouts for tools and outbound messages. Final CLARIFY blocks. One final denial is recorded per action; review infrastructure failures are not security-denial signals.</li>
+<li><code>debate_review</code> log entries report routing, attempted call count, elapsed time and failed stage. Provider usage and actual cost are not yet exposed by the shared client.</li>
+</ul>
+<p>Deterministic tests cover routing, independent advocates, context delivery, escalation, malformed responses, deadline cancellation, gate precedence and outbound test-mode/failure cancellation. Real-provider comparative evaluation remains outstanding; do not infer a safety improvement from these wiring tests.</p>
+<h2 id="origin">Origin</h2>
+<p>This is not a new idea invented for NanCy — it&#39;s already implemented and running in a sibling project, <code>fxg55647/leima</code> (<code>neutral_witness.py</code>), for a different problem (evaluating whether a document supports or contradicts a factual claim). Leima&#39;s pattern:</p>
+<ol>
+<li><strong>Support analyst</strong> (<code>p1</code>, stateless): &quot;Identify what in the document supports the claim... Do not consider contradictions or gaps.&quot;</li>
+<li><strong>Refutation analyst</strong> (<code>p2</code>, stateless): &quot;Identify what in the document contradicts the claim... Do not consider supporting evidence.&quot;</li>
+<li><strong>Judge</strong> (<code>_synthesis_prompt</code>): receives <em>only the text of both analyses</em> (not the original document), weighs which had stronger evidence, and delivers the final verdict. Explicitly told to discount a refutation that&#39;s technically true but doesn&#39;t actually address the claim, and told a clear verdict beats a hedge.</li>
+</ol>
+<p>Three passes, two of them deliberately one-sided and blind to the other&#39;s concern, one synthesis. <code>PASS_LABELS = [&quot;Supporting evidence&quot;, &quot;Contradicting evidence&quot;, &quot;Verdict&quot;]</code>.</p>
+<h2 id="why-this-might-be-worth-adapting-for-nancy">Why this might be worth adapting for NanCy</h2>
+<p>NanCy&#39;s current per-call analysis (<code>before_tool_call</code>&#39;s full-analysis prompt, <code>message_sending</code>&#39;s analysis prompt) is a single LLM call asked to weigh everything at once — the confirmed task, the standing policy, the action — and produce ALLOW/BLOCK/CLARIFY in one pass. A single pass can anchor on whichever consideration it reads or weighs first, and there&#39;s no structural pressure to seriously consider the <em>other</em> side before answering. Splitting the &quot;does this fit&quot; and &quot;does this not fit&quot; question into two independent, blind passes — each instructed to ignore the opposing concern — forces both cases to actually get made, before anything synthesizes them. This is a form of self-consistency / structured debate, a known technique for making a single model&#39;s judgment more reliable at the cost of more inference.</p>
+<h2 id="proposed-design-open-not-decided">Proposed design (open, not decided)</h2>
+<h3 id="where-it-would-apply">Where it would apply</h3>
+<p>Only the per-call decision prompts that produce a final ALLOW/BLOCK/CLARIFY verdict on real content — <code>before_tool_call</code>&#39;s full analysis and <code>message_sending</code>&#39;s analysis. <strong>Not</strong> proposed for:</p>
+<ul>
+<li><strong>Gap detection</strong> (<code>src/confirmation/gap-detection.ts</code>) — already advisory-only; there&#39;s no &quot;for/against&quot; framing that makes sense for &quot;what&#39;s missing.&quot;</li>
+<li><strong>Destination preflight</strong> (<code>metadataPreflightPrompt</code>) — deliberately cheap and metadata-only by design; tripling its cost defeats its purpose (avoid full review when unnecessary).</li>
+<li><strong>Browser context-only pre-check</strong> — narrow single question (&quot;does this page belong to the task&quot;), not really a for/against question.</li>
+<li><strong>Macro-review</strong> — pattern-level judgment over history, not a single action&#39;s verdict.</li>
+</ul>
+<h3 id="the-three-prompts">The three prompts</h3>
+<ol>
+<li><strong>FOR pass</strong> (stateless): given the confirmed task, standing policy, and the action, argue why it plausibly matches the task and complies with policy. Instructed not to raise objections.</li>
+<li><strong>AGAINST pass</strong> (stateless, independent of the FOR pass — not shown its output): argue why the action might not be authorized — task mismatch, policy violation, injection/exfiltration shape. Instructed not to concede points in the action&#39;s favor.</li>
+<li><strong>JUDGE pass</strong>: receives both arguments and decides ALLOW / BLOCK / CLARIFY.</li>
+</ol>
+<h3 id="a-deliberate-departure-from-leimas-judge-give-it-the-raw-context-too">A deliberate departure from Leima&#39;s judge: give it the raw context too</h3>
+<p>Leima&#39;s judge sees <em>only</em> the two analyses, trusting its analysts completely — reasonable for document fact-checking, where the risk of a bad outcome is a wrong verdict on a claim. NanCy&#39;s stakes are different: the FOR and AGAINST passes both read the same potentially-adversarial content (a fetched page, tool output, an injected instruction). A prompt injection good enough to fool one pass could plausibly fool both consistently, and a judge that only ever sees their words would have no independent way to notice.</p>
+<p>Proposal: the JUDGE pass should receive the mandatory baseline, operator policy, confirmed task (or the existing restricted info-lookup baseline), exact action/tool parameters or outbound message, and the same bounded page/history context used for full review <strong>directly</strong>, alongside both arguments. Policy and task alone are insufficient: without the action and relevant evidence, the judge cannot independently identify what the advocates missed. Build one bounded review snapshot and use it consistently across all three passes, preserving the existing content-minimization rules.</p>
+<p>This additional context also exposes the judge to potentially injected content; it is not an injection defense by itself. Treat both advocates&#39; outputs as untrusted analysis, never as instructions or authority. Bound their lengths and ask for evidence references and explicit missing information. Neither advocate should invent evidence just to make its assigned case; &quot;no supported case found&quot; must be a valid response.</p>
+<h3 id="clarify-doesnt-map-cleanly-onto-for-vs-against">CLARIFY doesn&#39;t map cleanly onto &quot;for vs. against&quot;</h3>
+<p>Leima&#39;s judge only ever produces a verdict on a two-sided question (supports/contradicts). NanCy&#39;s judge needs a third option for genuine ambiguity. Proposed rule: ALLOW requires clear task authorization and compliance with both policies; a demonstrated policy violation requires BLOCK even if the FOR case is persuasive. Use CLARIFY when authorization or relevant facts remain unclear. Argument strength alone must never determine authorization. A final CLARIFY still blocks the action under the current enforcement model.</p>
+<h3 id="activation-options">Activation options</h3>
+<p>Three designs to compare before implementation; none is approved yet:</p>
+<ul>
+<li><p><strong>A. Applies to every full review when enabled</strong> — simple and predictable, with three LLM calls replacing one full-review call. Existing preflights remain unchanged, so this does not triple every call in the complete pipeline. FOR and AGAINST can run concurrently, followed by JUDGE: two sequential stages, not necessarily three times the latency. Token cost depends on context and output sizes, especially the judge&#39;s additional arguments.</p>
+</li>
+<li><p><strong>B. Escalation only</strong>: run the normal single pass first; only invoke the FOR/AGAINST/JUDGE sequence when the single pass itself returns CLARIFY (i.e., use debate mode as a structured &quot;second opinion&quot; for cases the model itself flagged as uncertain, rather than tripling cost on the large majority of calls that are unambiguous). This is cheaper and arguably better-targeted (debate has the most value exactly where a single pass hedges), but changes CLARIFY&#39;s current meaning (&quot;fails closed, blocked&quot;) into &quot;triggers one more expensive check first&quot; — a behavior change beyond just adding an option, and worth deciding deliberately rather than as an implementation detail.</p>
+</li>
+<li><p><strong>C. Risk-based hybrid (review recommendation, pending evaluation)</strong>: route high-consequence actions directly to debate, and use single-pass review for the rest with one optional CLARIFY escalation. Candidate categories include purchases, destructive operations, permission changes, and external transmission of sensitive data. Define routing in trusted code using tool/destination metadata and operator configuration; do not let the worker label its own action low-risk. Unknown or insufficient metadata needs an explicit conservative routing rule. The exact categories and thresholds remain open and need bypass tests, including equivalent actions expressed through shell commands or generic browser tools.</p>
+</li>
+</ul>
+<p>B cannot catch a confidently wrong single-pass ALLOW: that result never escalates. C can cover that failure for actions routed to debate, but its routing may still miss consequential actions. All modes remain opt-in pending evaluation. Existing deterministic gates and preflight blocks retain precedence; debate cannot override them.</p>
+<p>Under B, an escalated action costs <strong>four calls total</strong>: the initial review plus FOR, AGAINST, and JUDGE. With concurrent advocates, that is three sequential stages. Under C, directly routed actions use three calls and escalated actions use four. Permit at most one escalation per action, with a shared time/token budget rather than an unbounded retry loop.</p>
+<h3 id="failure-behavior-proposal-requiring-an-explicit-implementation-decision">Failure behavior (proposal requiring an explicit implementation decision)</h3>
+<p>Require valid, bounded responses from both advocates and a valid final judge verdict before debate can authorize an action. An exception, timeout, empty response, or malformed result in any required pass must not become ALLOW or silently fall back to the FOR argument. Cancel remaining work when the shared deadline expires. An initial CLARIFY remains blocked if its escalation fails.</p>
+<p>At proposal time, tool calls failed closed while outbound-message exceptions failed open. The implementation now cancels the message on every required-review failure in all modes, including single-pass. This prevents a provider outage or malformed response from becoming an outbound bypass, at the cost of suppressing ordinary replies during that outage.</p>
+<p>Log the selected route, failed stage, final verdict, elapsed time, and usage where available. Count one final security denial per action, not one per advocate; infrastructure failures must retain their existing non-security classification. Preserve test mode&#39;s no-execution/no-send guarantees.</p>
+<h2 id="open-questions--risks">Open questions / risks</h2>
+<ul>
+<li><strong>Cost and latency</strong>: even under design B, this is a real operational cost increase for every CLARIFY case; under design A it multiplies the cost of the entire per-call review pipeline. Needs an explicit decision from whoever operates a given deployment, not a silent default change.</li>
+<li><strong>Shared blind spots</strong>: if the FOR and AGAINST passes use the <em>same</em> model as each other (as opposed to genuinely independent models), correlated failure is still possible — both could be fooled by the same injection, or share the same training-induced bias. Using two different models/providers for FOR vs. AGAINST (mirroring the existing &quot;reviewer should differ from the main agent&quot; recommendation in README) is worth considering, at real added complexity (two provider configs instead of one).</li>
+<li><strong>Does it actually improve verdict quality for NanCy&#39;s specific decision (task/policy alignment), or mainly for Leima&#39;s (evidence weighing)?</strong> Untested. Before implementing, this should be validated the same way other reviewer changes in this repo have been — via <code>scripts/run-eval.mts</code>&#39;s verdict-variance section (same ambiguous case, run N times, single-pass vs. debate-mode) — to see whether debate mode is measurably more consistent/correct on genuinely hard cases, not just more expensive.</li>
+</ul>
+<h2 id="ifwhen-this-gets-implemented">If/when this gets implemented</h2>
+<p>Before adopting a mode, compare single-pass, always-debate, and the proposed routing strategies on the same labeled scenarios. Repeated verdict agreement is only a secondary metric: a consistently wrong ALLOW is still a security failure. Measure:</p>
+<ul>
+<li>False ALLOW rates for unauthorized actions and policy violations, and false blocks on authorized actions; report sample counts and uncertainty, not just aggregate accuracy.</li>
+<li>Browser/email prompt injection, malicious instructions carried through an advocate&#39;s output, exfiltration to an allowed recipient, and actions that advance the task through forbidden means.</li>
+<li>Confidently wrong single-pass ALLOW cases as well as ambiguous cases, so CLARIFY-only escalation is evaluated against its blind spot.</li>
+<li>Per-action calls, token usage/cost, latency (including tail latency), and timeout/error rates, including unchanged preflights.</li>
+</ul>
+<p>Use mocked integration tests for each failed or malformed pass, final CLARIFY handling, routing bypass attempts, deterministic-block precedence, and outbound cancellation on debate errors. Predefine acceptable safety/false-block and cost/latency tradeoffs before judging results. Build an isolated eval prototype first; any claimed reliability improvement remains unverified until these comparisons support it.</p>
+<p>Follow the pattern established for gap-detection and denial-escalation: a focused module (e.g. <code>src/analysis/debate.ts</code>) with pure prompt-builder/parser functions, unit tests with mocked responses for the parsing/wiring logic, and a dedicated <code>scripts/run-eval.mts</code> section comparing single-pass vs. debate-mode verdicts on the same set of genuinely ambiguous scenarios against the real configured model — not just on the easy, unambiguous ones already in <code>scripts/eval-scenarios.json</code>.</p>
+
+<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit 4a3103f. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
+</main>
+</div>
+</body>
+</html>

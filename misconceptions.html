@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MISCONCEPTIONS — NanCy SSIL</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1a1a1a; --muted: #5b6472; --border: #e2e5ea;
+  --accent: #7c3aed; --code-bg: #f4f4f7; --nav-bg: #fafafa;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14161c; --fg: #eef0f4; --muted: #9aa3b2; --border: #2a2e38;
+    --accent: #b794f6; --code-bg: #1c1f27; --nav-bg: #191b22;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); }
+.layout { display: flex; min-height: 100vh; }
+nav.sidebar { width: 260px; flex-shrink: 0; background: var(--nav-bg); border-right: 1px solid var(--border); padding: 24px 16px; }
+nav.sidebar h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 20px 0 6px; }
+nav.sidebar ul { list-style: none; margin: 0; padding: 0; }
+nav.sidebar li a { display: block; padding: 4px 8px; border-radius: 6px; text-decoration: none; color: var(--fg); font-size: 14px; }
+nav.sidebar li a[aria-current="page"] { background: var(--accent); color: #fff; }
+nav.sidebar li a:hover { background: var(--border); }
+.brand { font-weight: 700; font-size: 18px; margin-bottom: 4px; }
+.brand-sub { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+main { flex: 1; min-width: 0; padding: 40px clamp(16px, 5vw, 64px); max-width: 860px; }
+main h1:first-child { margin-top: 0; }
+pre { background: var(--code-bg); padding: 14px 16px; overflow-x: auto; border-radius: 8px; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; overflow-x: auto; display: block; }
+th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+blockquote { border-left: 3px solid var(--accent); margin: 0; padding: 0 16px; color: var(--muted); }
+img { max-width: 100%; }
+footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+#nav-toggle { display: none; }
+.nav-toggle-label { display: none; }
+@media (max-width: 800px) {
+  .layout { display: block; }
+  nav.sidebar { width: auto; border-right: none; border-bottom: 1px solid var(--border); }
+  #nav-toggle:not(:checked) ~ .layout nav.sidebar .nav-body { display: none; }
+  .nav-toggle-label { display: block; padding: 16px; cursor: pointer; font-weight: 600; }
+}
+</style>
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="layout">
+<nav class="sidebar">
+<label class="nav-toggle-label" for="nav-toggle">☰ Docs menu</label>
+<div class="nav-body">
+<div class="brand">NanCy SSIL</div>
+<div class="brand-sub"><a href="https://github.com/fxg55647/NanCy">GitHub ↗</a></div>
+<div class="nav-group"><h2>Overview</h2><ul><li><a href="index.html">NanCy SSIL</a></li><li><a href="claude.html">CLAUDE</a></li><li><a href="how-agents-go-wrong.html">HOW AGENTS GO WRONG</a></li><li><a href="incidents.html">INCIDENTS</a></li><li><a href="misconceptions.html" aria-current="page">MISCONCEPTIONS</a></li><li><a href="nancy-policy.html">NANCY POLICY</a></li><li><a href="related-work.html">RELATED WORK</a></li><li><a href="security-philosophy.html">SECURITY PHILOSOPHY</a></li><li><a href="testing.html">TESTING</a></li></ul></div><div class="nav-group"><h2>Architecture</h2><ul><li><a href="architecture/debate-review.html">Debate Review</a></li><li><a href="architecture/denial-escalation-and-clarification.html">Denial Escalation And Clarification</a></li><li><a href="architecture/gap-detection.html">Gap Detection</a></li><li><a href="architecture/policy-precedence.html">Policy Precedence</a></li></ul></div><div class="nav-group"><h2>Audits</h2><ul><li><a href="audits/2026-09-14-security-review.html">2026 09 14 Security Review</a></li></ul></div>
+</div>
+</nav>
+<main>
+<h1 id="common-misconceptions">Common Misconceptions</h1>
+<p><strong>&quot;The agent and the reviewer will just collude.&quot;</strong> It&#39;s true, in general, that one AI agent can manipulate another — that&#39;s exactly the &quot;monitor collusion&quot; risk the AI-control literature studies (see <a href="related-work.html">RELATED-WORK.md</a>), and it&#39;s a real concern for setups where the same two models interact repeatedly. It doesn&#39;t play out the same way here: analysis is stateless (feature #1 in the <a href="index.html">README</a>), so the agent and NanCy&#39;s reviewer model meet for the first time on <em>every single call</em>. There is no persistent relationship, rapport, or negotiation history between them for a collusion pattern to build up over — each verdict is an isolated judgment against the confirmed task, with no memory of any previous exchange, friendly or otherwise, and no channel through which one could be built.</p>
+<p><strong>&quot;The agent can talk to NanCy.&quot;</strong> It can&#39;t, not directly — there&#39;s no tool or channel for the agent to message, negotiate with, or plead its case to the reviewer. The only &quot;communication&quot; is whatever data NanCy itself chooses to read (tool-call parameters, outbound message content, browser page snapshots, stated reasoning) to build its analysis prompt. That cuts both ways, though: content NanCy reads that originated <em>outside</em> the agent — a scraped webpage, a filled-in form field, an inbound email body — flows into the reviewer&#39;s own prompt largely as-is. A malicious page or email could attempt prompt injection against <strong>NanCy itself</strong>, not just the agent. This isn&#39;t mitigated yet. Simply refusing to read that content would gut most of what NanCy analyzes, so the honest fix is defanging it before it reaches the prompt — which is exactly what the Contextual Scrambler / PIDD integration (feature #4 in the README, still 🧭 not implemented) is meant to do. Until then, treat it as an open attack surface.</p>
+<p><strong>&quot;An AI reviewer will go easy on a fellow AI.&quot;</strong> There&#39;s no mechanism here for that. The reviewer prompt frames the task purely as evaluating one action against a confirmed goal — it&#39;s never told, and has no way to infer, that the action came from &quot;another AI&quot; in any sense that would invite in-group loyalty. LLMs don&#39;t carry a persistent identity or affinity toward &quot;AI as a class&quot; the way humans can show loyalty to their own group; nothing in how these models are trained, or in NanCy&#39;s prompt design, creates or rewards that behavior. That said, this expectation is grounded in how the models work generally, not something adversarially tested against NanCy specifically — treat it as a reasonable default, not a verified guarantee.</p>
+
+<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit 4a3103f. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
+</main>
+</div>
+</body>
+</html>

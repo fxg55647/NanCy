@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TESTING — NanCy SSIL</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1a1a1a; --muted: #5b6472; --border: #e2e5ea;
+  --accent: #7c3aed; --code-bg: #f4f4f7; --nav-bg: #fafafa;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14161c; --fg: #eef0f4; --muted: #9aa3b2; --border: #2a2e38;
+    --accent: #b794f6; --code-bg: #1c1f27; --nav-bg: #191b22;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); }
+.layout { display: flex; min-height: 100vh; }
+nav.sidebar { width: 260px; flex-shrink: 0; background: var(--nav-bg); border-right: 1px solid var(--border); padding: 24px 16px; }
+nav.sidebar h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 20px 0 6px; }
+nav.sidebar ul { list-style: none; margin: 0; padding: 0; }
+nav.sidebar li a { display: block; padding: 4px 8px; border-radius: 6px; text-decoration: none; color: var(--fg); font-size: 14px; }
+nav.sidebar li a[aria-current="page"] { background: var(--accent); color: #fff; }
+nav.sidebar li a:hover { background: var(--border); }
+.brand { font-weight: 700; font-size: 18px; margin-bottom: 4px; }
+.brand-sub { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+main { flex: 1; min-width: 0; padding: 40px clamp(16px, 5vw, 64px); max-width: 860px; }
+main h1:first-child { margin-top: 0; }
+pre { background: var(--code-bg); padding: 14px 16px; overflow-x: auto; border-radius: 8px; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; overflow-x: auto; display: block; }
+th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+blockquote { border-left: 3px solid var(--accent); margin: 0; padding: 0 16px; color: var(--muted); }
+img { max-width: 100%; }
+footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+#nav-toggle { display: none; }
+.nav-toggle-label { display: none; }
+@media (max-width: 800px) {
+  .layout { display: block; }
+  nav.sidebar { width: auto; border-right: none; border-bottom: 1px solid var(--border); }
+  #nav-toggle:not(:checked) ~ .layout nav.sidebar .nav-body { display: none; }
+  .nav-toggle-label { display: block; padding: 16px; cursor: pointer; font-weight: 600; }
+}
+</style>
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="layout">
+<nav class="sidebar">
+<label class="nav-toggle-label" for="nav-toggle">☰ Docs menu</label>
+<div class="nav-body">
+<div class="brand">NanCy SSIL</div>
+<div class="brand-sub"><a href="https://github.com/fxg55647/NanCy">GitHub ↗</a></div>
+<div class="nav-group"><h2>Overview</h2><ul><li><a href="index.html">NanCy SSIL</a></li><li><a href="claude.html">CLAUDE</a></li><li><a href="how-agents-go-wrong.html">HOW AGENTS GO WRONG</a></li><li><a href="incidents.html">INCIDENTS</a></li><li><a href="misconceptions.html">MISCONCEPTIONS</a></li><li><a href="nancy-policy.html">NANCY POLICY</a></li><li><a href="related-work.html">RELATED WORK</a></li><li><a href="security-philosophy.html">SECURITY PHILOSOPHY</a></li><li><a href="testing.html" aria-current="page">TESTING</a></li></ul></div><div class="nav-group"><h2>Architecture</h2><ul><li><a href="architecture/debate-review.html">Debate Review</a></li><li><a href="architecture/denial-escalation-and-clarification.html">Denial Escalation And Clarification</a></li><li><a href="architecture/gap-detection.html">Gap Detection</a></li><li><a href="architecture/policy-precedence.html">Policy Precedence</a></li></ul></div><div class="nav-group"><h2>Audits</h2><ul><li><a href="audits/2026-09-14-security-review.html">2026 09 14 Security Review</a></li></ul></div>
+</div>
+</nav>
+<main>
+<h1 id="testing-nancy">Testing NanCy</h1>
+<p>NanCy is security-critical and easy to get subtly wrong. This doc is the
+fast-orientation guide for testing changes to the plugin (<code>src/index.ts</code> and
+the modules under <code>src/</code> it wires together — see <code>CLAUDE.md</code>&#39;s module map) —
+read it before touching <code>before_tool_call</code>, <code>message_sending</code>, or <code>testMode</code>
+logic. It complements <code>CLAUDE.md</code> (orientation) and <code>SECURITY-PHILOSOPHY.md</code>
+(deployment posture).</p>
+<h2 id="the-one-rule-never-touch-the-live-gateway-on-your-own-initiative">The one rule: never touch the live gateway on your own initiative</h2>
+<p>The operator normally has a real OpenClaw gateway running in the foreground
+(<code>openclaw gateway run</code>), wired to a real Telegram bot. It is tempting to
+just restart it with a test config to see what happens. Don&#39;t — unless the
+operator explicitly asks you to, in the moment, for that specific action.
+Absent that ask, the default is still don&#39;t.</p>
+<ul>
+<li><code>openclaw gateway stop</code> / <code>--force</code> explicitly refuses this: <em>&quot;This stops
+the operator&#39;s running gateway service. Use an isolated dev gateway... for
+testing.&quot;</em> That&#39;s the project&#39;s own CLI telling you the right answer for
+anything you&#39;re doing on your own initiative rather than on request.</li>
+<li>Claude Code&#39;s own auto-mode safety classifier independently blocks
+<code>taskkill</code>/process-kill attempts against it (&quot;Interfere With Workloads&quot;) —
+that&#39;s a bypass of the gateway&#39;s own process, not a sanctioned way to honor
+an operator request either; use the project&#39;s own stop/run commands.</li>
+<li>Even a clean restart means a real, possibly mid-conversation Telegram bot
+goes offline for a few seconds — for a stranger&#39;s phone notification, not
+a lab environment. That&#39;s a cost the operator gets to accept for
+themselves, not one you assume on their behalf.</li>
+</ul>
+<p>If you think you need the live gateway, you almost certainly want one of the
+two options below instead. The things that actually require touching the
+live gateway are (a) confirming a <em>config</em> change (like a new
+<code>analysis.model</code>) with a real live conversation, and (b) an operator request,
+made in this conversation, to start/stop/restart it right now. Both still go
+through the project&#39;s own commands (<code>openclaw config set</code> for validated
+writes, <code>openclaw gateway run</code>/<code>stop</code> for the process itself) — never a
+bypass like <code>taskkill</code>. Never restart or stop it on your own initiative for
+exploratory testing; do it only on a specific, in-the-moment operator
+request, not because a past instruction in this file or elsewhere implied
+general standing permission.</p>
+<h2 id="option-a--npm-test-fast-deterministic-no-network">Option A — <code>npm test</code> (fast, deterministic, no network)</h2>
+<p>Experimental debate comparison: <code>node --experimental-strip-types scripts/eval-debate.mts --list</code> previews synthetic cases without network access. To run them against a real model, set <code>NANCY_EVAL_CONFIG</code> to a JSON file containing an <code>AnalysisConfig</code> (provider/model/apiKey/baseUrl) and run the same command without <code>--list</code>. <code>NANCY_EVAL_RUNS</code> defaults to 3. This uses only the reviewer API, never a gateway, and writes <code>DEBATE-EVAL-RESULTS.json</code> with per-case verdicts, false-ALLOW/false-block flags, call counts and elapsed time for all four modes. It does not measure provider tokens/cost or prove deployment safety. The existing full-hook eval remains necessary for integration coverage.</p>
+<pre><code>npm run check   # typecheck + test
+npm test        # just the test suite (node --test test/*.test.ts)
+</code></pre>
+<p><code>test/helpers.ts</code> exports <code>createFakeApi()</code>: a minimal fake of the OpenClaw
+plugin host (<code>rootDir</code>, <code>pluginConfig</code>, <code>runtime.agent.resolveAgentWorkspaceDir</code>,
+<code>runtime.subagent</code>, <code>on()</code>) pointed at a fresh temp directory. It&#39;s enough
+surface for <code>nancyPlugin.register(api)</code> to run for real — this exercises the
+actual <code>src/index.ts</code> code, not a reimplementation of it.</p>
+<p>Pattern for a new test (see <code>test/testmode-message-sending.test.ts</code> for the
+full version):</p>
+<pre><code class="language-ts">import { test } from &quot;node:test&quot;;
+import assert from &quot;node:assert/strict&quot;;
+import nancyPlugin from &quot;../src/index.ts&quot;;
+import { createFakeApi } from &quot;./helpers.ts&quot;;
+
+test(&quot;describe the one behavior under test&quot;, async () =&gt; {
+  const { api, handlers, cleanup } = createFakeApi({
+    pluginConfig: { testMode: true, analysis: { provider: &quot;openai&quot;, model: &quot;test-model&quot;, apiKey: &quot;x&quot; } },
+  });
+  // @ts-expect-error FakeApi is a narrowed stand-in for OpenClawPluginApi
+  nancyPlugin.register(api);
+  // mock global.fetch here if the path under test calls callLlm() or Telegram
+  const result = await handlers.before_tool_call({ toolName: &quot;exec&quot;, params: { command: &quot;dir&quot; } }, { sessionKey: &quot;s1&quot; });
+  assert.equal(result?.block, true);
+  cleanup();
+});
+</code></pre>
+<p>Mock <code>globalThis.fetch</code> around the call (see <code>mockFetchOnce</code> in
+<code>test/testmode-message-sending.test.ts</code>) to control the LLM verdict without
+hitting a real API — this is what makes the suite fast and free. Use this
+tier for regression tests: &quot;does this exact code path still behave the way
+we decided it should.&quot;</p>
+<p>This tier cannot tell you whether the <em>real</em> configured reviewer model would
+actually reach a sensible verdict for some scenario — its canned responses
+prove the plumbing works, not the judgment. For that, use Option B.</p>
+<h2 id="option-b--standalone-harness-against-the-real-analysis-model">Option B — standalone harness against the real analysis model</h2>
+<p>Same <code>createFakeApi()</code>-style stubbing, but with the real <code>analysis</code> config
+(provider/model/apiKey) from the operator&#39;s live config, and <em>without</em>
+mocking <code>fetch</code> — so <code>callLlm()</code> makes a genuine call and you see a real
+ALLOW/BLOCK/CLARIFY verdict for a specific realistic scenario. Use this when
+you need to know &quot;would the actual reviewer catch this,&quot; not just &quot;does the
+code path work.&quot;</p>
+<pre><code class="language-js">import { readFileSync } from &quot;fs&quot;;
+import { pathToFileURL } from &quot;url&quot;;
+import { createFakeApi } from &quot;./test/helpers.ts&quot;; // or inline an equivalent stub
+
+const live = JSON.parse(readFileSync(String.raw`C:\Users\&lt;user&gt;\.openclaw\openclaw.json`, &quot;utf8&quot;));
+const analysis = live.plugins.entries.nancy.config.analysis; // reuse the real reviewer config
+
+// IMPORTANT: never let a real Telegram push escape a test run.
+const realFetch = global.fetch;
+global.fetch = async (url, opts) =&gt; {
+  if (String(url).includes(&quot;api.telegram.org&quot;)) {
+    console.log(&quot;[INTERCEPTED TELEGRAM SEND]&quot;, JSON.parse(opts.body).text);
+    return { ok: true, json: async () =&gt; ({ ok: true }) };
+  }
+  return realFetch(url, opts); // real Gemini/OpenAI calls still go through
+};
+
+const { api, handlers, rootDir } = createFakeApi({ pluginConfig: { analysis, testMode: true } });
+const mod = await import(pathToFileURL(String.raw`C:\projects\nancy\src\index.ts`).href);
+mod.default.register(api);
+
+// There is no confirmed-task FILE to write anymore (see below) — a task is
+// only ever authorized by actually driving the real confirmation dance
+// through message_sending + message_received (see the confirmation-request
+// format below), which is what spawnWorkerForTask uses to populate the
+// in-memory authorization for the exact worker session key it creates.
+// Then call handlers.before_tool_call({ toolName, params }, { sessionKey, agentId })
+// and read rootDir + &quot;/nancy.log&quot; / &quot;/nancy-analysis.log&quot; for what happened.
+</code></pre>
+<p>Always keep <code>testMode: true</code> in this tier unless the entire point of the run
+is to check what a <em>real</em> ALLOW would let through — with <code>testMode: true</code>,
+even a genuine ALLOW verdict is turned into a block that names what it would
+have done, so a bad verdict can never actually do anything. This applies to
+both <code>before_tool_call</code> (tool calls) and <code>message_sending</code> (outbound
+messages) — a real ALLOW, an analysis error, and a missing-analysis-config
+all dry-run as a cancel instead of sending, and the reason logged/returned
+says <code>TEST MODE</code>. The one deliberate exception is NanCy&#39;s own fixed-format
+confirmation-request prompt (<code>Formal confirmation: ...</code>), which still sends
+for real even in test mode — it&#39;s a rigid, NanCy-recognized template rather
+than arbitrary agent content, it&#39;s the only way to exercise the confirmation
+dance end-to-end, and it&#39;s sent for real in production anyway.</p>
+<p><strong>Always intercept <code>api.telegram.org</code></strong> in this tier (as above) if
+<code>telegramAlerts</code>/<code>telegramTaskReports</code> might be enabled in the config you
+copy — otherwise a test run can push a real, confusing notification to the
+operator&#39;s real phone. Belt-and-suspenders: <code>createFakeApi()</code>&#39;s <code>api.config</code>
+defaults to <code>{}</code>, so if you never copy <code>channels.telegram</code> into the
+<code>pluginConfig</code>/<code>api.config</code> you pass it, <code>telegramAlertsEnabled</code>/
+<code>telegramTaskReportsEnabled</code> resolve <code>false</code> regardless of what the live
+config says — do that <em>in addition to</em> the fetch intercept, not instead of
+it (a future code path could read <code>channels.telegram</code> some other way).</p>
+<h3 id="practical-gotchas-from-actually-running-this-tier-once">Practical gotchas, from actually running this tier once</h3>
+<ul>
+<li><strong>Finding the live config path</strong>: don&#39;t guess
+<code>~/.openclaw/openclaw.json</code> or hand-build it from <code>$env:USERPROFILE</code> inside
+a <code>Bash</code>-tool call that shells out to <code>powershell -Command &quot;...$env:...</code>&quot;<code>— the outer POSIX shell can mangle the</code>$env:<code>reference before PowerShell ever sees it, silently producing a wrong path that then reads as &quot;file doesn&#39;t exist.&quot; Either run</code>openclaw config file` (prints the actual active
+config path, read-only, safe) or check the path with a PowerShell-tool call
+directly rather than nesting it inside the Bash tool.</li>
+<li><strong>A standalone harness script placed <em>outside</em> the <code>nancy</code> repo</strong> (e.g. in
+a scratch/temp dir) has no ancestor <code>package.json</code> with <code>&quot;type&quot;: &quot;module&quot;</code>,
+so <code>node --experimental-strip-types &lt;file&gt;.ts</code> on it resolves as CommonJS
+and rejects top-level <code>await</code>/<code>import</code>. Name it <code>.mts</code> instead — Node
+always treats that extension as ESM regardless of the nearest
+<code>package.json</code> — or run it from inside the repo.</li>
+<li><strong><code>createFakeApi()</code>&#39;s default <code>subagent.waitForRun</code> resolves immediately</strong>,
+which makes NanCy tear the worker session down (<code>deleteSession</code>) right
+after spawn — so a <code>before_tool_call</code> you fire moments later against
+<code>agent:&lt;workerAgentId&gt;:task-&lt;id&gt;</code> already sees no authorization. To
+actually probe a worker session&#39;s behavior after confirming it, pass a
+<code>subagent</code> override with <code>waitForRun: () =&gt; new Promise(() =&gt; {})</code> (never
+resolves), the same trick <code>test/worker-task-authorization.test.ts</code> uses to
+keep two tasks genuinely concurrent — this keeps the session &quot;live&quot; so you
+can fire as many <code>before_tool_call</code>s at it as you want.</li>
+<li><strong>The worker session key is derived from the task id you pick</strong>, not from
+whatever session confirmed it: confirm with
+<code>confirmTask(&quot;sess-1&quot;, &quot;424242&quot;, description)</code> and then probe
+<code>agent:&lt;workerAgentId&gt;:task-424242</code> — those are two different session keys
+and mixing them up looks like &quot;authorization never took,&quot; when it&#39;s just
+the wrong key. Task IDs must also be unique: a second pending or confirmed
+request with the same ID is rejected before a worker session is created.</li>
+<li>A deliberately mismatched action (e.g. confirm a &quot;look up flight prices,
+never buy&quot; task, then send a <code>browser act click</code> on a buy button, or an
+<code>exec</code> shelling a payment POST) is a good sanity check that the real
+reviewer model — not just the plumbing — catches intent mismatches. Note
+that NanCy&#39;s context-check step can reasonably block a <em>literally</em> benign
+follow-up action too, if it looks like a continuation of a page/flow it
+just blocked (e.g. still typing into a field on what it believes is a
+checkout page) — that&#39;s the reviewer using state, not a bug in the harness.</li>
+</ul>
+<h2 id="reusable-scenario-eval-scriptsrun-evalmts">Reusable scenario eval (<code>scripts/run-eval.mts</code>)</h2>
+<p>A fixed, hand-written set of scenarios (<code>scripts/eval-scenarios.json</code>) — protected-path writes, the main/cron default-deny gate, the no-confirmed-task hard block, Domain Border Control, and genuine intent-match/mismatch/ambiguous cases — runnable end-to-end against the real configured reviewer model with the exact Option B safety properties above (<code>testMode: true</code>, live gateway never touched, no channels/telegram config passed into the harness). Run it and it (re)writes <code>EVAL-RESULTS.md</code> at the repo root:</p>
+<pre><code>node --experimental-strip-types scripts/run-eval.mts
+node --experimental-strip-types scripts/run-eval.mts --config=C:\path\to\openclaw.json
+</code></pre>
+<p>Re-run this after changing <code>analysis.model</code> or anything under <code>src/policy/</code>/<code>src/analysis/</code> to catch reviewer-behavior regressions — it&#39;s the fastest way to see, in one shot, whether the real model still reaches the same verdicts across every gate NanCy has. Edit <code>scripts/eval-scenarios.json</code> to add scenarios; each needs a <code>sessionMode</code> (<code>&quot;none&quot;</code>, <code>&quot;main&quot;</code>, or <code>&quot;worker&quot;</code>) and, for <code>&quot;worker&quot;</code>, a <code>taskId</code> (6–10 digits) plus a <code>task</code> description — see the comments at the top of <code>run-eval.mts</code> for how session keys and task confirmation are derived.</p>
+<h2 id="confirmed-task-record-for-either-tier">Confirmed-task &quot;record&quot;, for either tier</h2>
+<p>There is no <code>tasks/current.json</code> file anymore — an earlier version stored
+the confirmed task in a shared file per agent workspace, which meant two
+tasks confirmed close together on the same <code>workerAgentId</code> could overwrite
+each other&#39;s authorization (the second worker could start seeing the first
+task&#39;s record, or vice versa — a real cross-task authorization leak, not
+just a cosmetic bug). Authorization now lives only in an in-memory
+<code>taskBySessionKey: Map&lt;string, ConfirmedTask&gt;</code>, keyed by the <em>exact</em> worker
+session key NanCy itself generates (<code>agent:&lt;workerAgentId&gt;:task-&lt;id&gt;</code>), and
+is populated only by <code>spawnWorkerForTask</code> right before it spawns that worker
+— never from anything the agent itself, or a test, can write directly. The
+shape of one entry:</p>
+<pre><code class="language-ts">{ id: &quot;12345678&quot;, ts: &quot;2026-09-12T20:00:00.000Z&quot;, description: &quot;What the task is&quot;, status: &quot;confirmed&quot;, openclaw_task_id: null }
+</code></pre>
+<p><code>ts</code> must be within <code>CONFIRMED_TASK_MAX_AGE_MS</code> (4 hours) of &quot;now&quot; or
+<code>getCurrentTask(sessionKey)</code> treats it as if nothing were confirmed.
+Practically: to test anything gated on &quot;a task is confirmed,&quot; drive the real
+confirmation dance (see below) rather than trying to seed state directly —
+that&#39;s now the only way in, by design.</p>
+<h2 id="which-tool-calls-actually-reach-the-llm-cheat-sheet">Which tool calls actually reach the LLM, cheat sheet</h2>
+<p>Verified against <a href="mailto:openclaw@2026.9.4">openclaw@2026.9.4</a>&#39;s own tool registry
+(<code>core-tool-factory-descriptors.ts</code>) and the browser/computer extension
+schemas — not guessed. Two things worth knowing before you touch this code:
+<code>&quot;shell&quot;</code>/<code>&quot;bash&quot;</code> were never real tool names (a leftover from an earlier,
+wrong assumption); and the browser tool&#39;s real dispatch field is <code>action</code>
+(with a nested <code>kind</code> only when <code>action: &quot;act&quot;</code>), not <code>command</code> — an earlier
+version of this gate read the nonexistent <code>command</code> field, which silently
+made every browser call invisible to both analysis and the main-session
+gate, in every session type, regardless of what it actually did.</p>
+<ul>
+<li><strong>Hard-blocked outright, no LLM call, independent of session</strong>: writes to
+a protected file (<code>AGENTS.md</code>/<code>IDENTITY.md</code>/<code>MEMORY.md</code>/<code>NANCY-POLICY.md</code>/
+NanCy&#39;s own code/config), and Domain Border Control denials.</li>
+<li><strong>Main session and cron-triggered runs: default-deny allowlist, no LLM
+call either way.</strong> <code>isMainGateAllowed()</code> only lets through pure local
+reads (<code>read</code>, <code>ls</code>, <code>view_image</code>, <code>get_goal</code>, <code>session_status</code>,
+<code>sessions_list</code>/<code>_history</code>/<code>_search</code>, <code>agents_list</code>,
+<code>conversations_list</code>, <code>github_identity_status</code>, <code>transcripts</code>) plus a
+curated set of passive <code>browser</code> actions (<code>snapshot</code>, <code>screenshot</code>,
+<code>text</code>, <code>tabs</code>, <code>console</code>, <code>requests</code>, <code>errors</code>, <code>status</code>, <code>doctor</code>) and
+<code>computer</code> actions (<code>screenshot</code>, <code>wait</code> — openclaw&#39;s own <code>LOCAL_ACTIONS</code>).
+Anything not on these lists — including <code>apply_patch</code>, <code>process</code>,
+<code>message</code>, and any tool NanCy has never heard of — is blocked outright.
+This used to be a <em>blocklist</em> naming only <code>write</code>/<code>edit</code>/<code>exec</code>; dozens of
+real tools (<code>secrets</code>, <code>gateway</code>, <code>subagents</code>, <code>sessions_spawn</code>/<code>_send</code>,
+<code>conversations_send</code>, <code>automations</code>, <code>github_publish</code>, <code>nodes</code>,
+<code>mobile_ui</code>, <code>terminal</code>, ...) fell through it completely unchecked. If you
+add a new tool call anywhere in this file, assume it is blocked by default
+in main/cron until proven otherwise — that&#39;s the point of default-deny.</li>
+<li><strong>Everything else that reaches <code>shouldAnalyze() === true</code></strong>: <code>web_fetch</code>,
+<code>web_search</code>, <code>write</code>, <code>edit</code>, <code>apply_patch</code>, <code>message</code>; every <code>exec</code> call;
+<code>process</code> for any action other
+than <code>list</code>/<code>poll</code>/<code>log</code>; and <code>browser</code> for the interactive actions
+(<code>start</code>/<code>stop</code>/<code>navigate</code>/<code>open</code>/<code>upload</code>/... — see
+<code>BROWSER_INTERACTIVE_ACTIONS</code>) or <code>action: &quot;act&quot;</code> with an interactive
+<code>kind</code> (<code>click</code>/<code>type</code>/<code>fill</code>/<code>select</code>/<code>drag</code>/<code>evaluate</code>/... — see
+<code>BROWSER_INTERACTIVE_ACT_KINDS</code>). These get a real LLM verdict.
+<strong>With no confirmed task</strong>, every one of these hard-blocks outright before
+any LLM call — <strong>except <code>web_search</code>/<code>web_fetch</code></strong>, which (with
+<code>allowUnconfirmedInfoLookups</code>, default <strong>on</strong>) still reach the real
+reviewer, judged against a fixed generic &quot;this must be a harmless,
+read-only information lookup&quot; baseline (<code>buildUnconfirmedInfoLookupTask</code> in
+<code>confirmation/tasks.ts</code>) instead of an actual confirmed task — so a benign
+search is routinely ALLOWed with no task, but an exfiltration-shaped
+<code>web_fetch</code> URL is not. Capped independently of the reviewer&#39;s own
+judgment by <code>unconfirmedInfoLookupLimitPerHour</code> (default 10/session/hour) —
+see <code>scripts/eval-scenarios.json</code>&#39;s <code>unconfirmed-info-lookup-*</code> scenarios
+and <code>test/unconfirmed-info-lookup.test.ts</code> for both properties verified.
+Set <code>allowUnconfirmedInfoLookups: false</code> to go back to the old strict
+behavior for these two tools as well.</li>
+<li><strong>Everything else</strong> (e.g. a plain <code>read</code>, or <code>browser</code> with a passive
+<code>action</code>) skips analysis entirely and passes straight through — instant,
+free, no LLM call.</li>
+</ul>
+<h2 id="live-dry-run-against-the-real-telegram-bot-without-the-cli-harness">Live dry-run against the real Telegram bot, without the CLI harness</h2>
+<p>If you specifically need to watch the <em>real</em> agent (real model, real
+AGENTS.md instructions) attempt a real task end-to-end while <code>testMode: true</code>
+guarantees nothing actually executes: set <code>testMode: true</code> on the live
+config via <code>openclaw config set plugins.entries.nancy.config.testMode true</code>,
+then restart the gateway — the operator&#39;s own restart on their own schedule,
+or yours if they explicitly ask for that specific restart in the moment —
+then drive it with <code>openclaw agent --session-key &lt;mainSessionKey&gt; --message &quot;...&quot;</code> for the task and a second call with <code>&quot;y&quot;</code> for the confirmation reply —
+both work over the CLI without going through Telegram at all, since NanCy&#39;s
+confirmation matching only keys on <code>sessionKey</code>, not channel. Turn
+<code>testMode</code> back off (<code>openclaw config unset ...</code>) and restart again the same
+way when done. Absent an explicit in-the-moment request, this still doesn&#39;t
+require killing/restarting the gateway on your own initiative.</p>
+
+<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit 4a3103f. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
+</main>
+</div>
+</body>
+</html>

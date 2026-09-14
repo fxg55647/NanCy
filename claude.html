@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CLAUDE — NanCy SSIL</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1a1a1a; --muted: #5b6472; --border: #e2e5ea;
+  --accent: #7c3aed; --code-bg: #f4f4f7; --nav-bg: #fafafa;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14161c; --fg: #eef0f4; --muted: #9aa3b2; --border: #2a2e38;
+    --accent: #b794f6; --code-bg: #1c1f27; --nav-bg: #191b22;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); }
+.layout { display: flex; min-height: 100vh; }
+nav.sidebar { width: 260px; flex-shrink: 0; background: var(--nav-bg); border-right: 1px solid var(--border); padding: 24px 16px; }
+nav.sidebar h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 20px 0 6px; }
+nav.sidebar ul { list-style: none; margin: 0; padding: 0; }
+nav.sidebar li a { display: block; padding: 4px 8px; border-radius: 6px; text-decoration: none; color: var(--fg); font-size: 14px; }
+nav.sidebar li a[aria-current="page"] { background: var(--accent); color: #fff; }
+nav.sidebar li a:hover { background: var(--border); }
+.brand { font-weight: 700; font-size: 18px; margin-bottom: 4px; }
+.brand-sub { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+main { flex: 1; min-width: 0; padding: 40px clamp(16px, 5vw, 64px); max-width: 860px; }
+main h1:first-child { margin-top: 0; }
+pre { background: var(--code-bg); padding: 14px 16px; overflow-x: auto; border-radius: 8px; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; overflow-x: auto; display: block; }
+th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+blockquote { border-left: 3px solid var(--accent); margin: 0; padding: 0 16px; color: var(--muted); }
+img { max-width: 100%; }
+footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+#nav-toggle { display: none; }
+.nav-toggle-label { display: none; }
+@media (max-width: 800px) {
+  .layout { display: block; }
+  nav.sidebar { width: auto; border-right: none; border-bottom: 1px solid var(--border); }
+  #nav-toggle:not(:checked) ~ .layout nav.sidebar .nav-body { display: none; }
+  .nav-toggle-label { display: block; padding: 16px; cursor: pointer; font-weight: 600; }
+}
+</style>
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="layout">
+<nav class="sidebar">
+<label class="nav-toggle-label" for="nav-toggle">☰ Docs menu</label>
+<div class="nav-body">
+<div class="brand">NanCy SSIL</div>
+<div class="brand-sub"><a href="https://github.com/fxg55647/NanCy">GitHub ↗</a></div>
+<div class="nav-group"><h2>Overview</h2><ul><li><a href="index.html">NanCy SSIL</a></li><li><a href="claude.html" aria-current="page">CLAUDE</a></li><li><a href="how-agents-go-wrong.html">HOW AGENTS GO WRONG</a></li><li><a href="incidents.html">INCIDENTS</a></li><li><a href="misconceptions.html">MISCONCEPTIONS</a></li><li><a href="nancy-policy.html">NANCY POLICY</a></li><li><a href="related-work.html">RELATED WORK</a></li><li><a href="security-philosophy.html">SECURITY PHILOSOPHY</a></li><li><a href="testing.html">TESTING</a></li></ul></div><div class="nav-group"><h2>Architecture</h2><ul><li><a href="architecture/debate-review.html">Debate Review</a></li><li><a href="architecture/denial-escalation-and-clarification.html">Denial Escalation And Clarification</a></li><li><a href="architecture/gap-detection.html">Gap Detection</a></li><li><a href="architecture/policy-precedence.html">Policy Precedence</a></li></ul></div><div class="nav-group"><h2>Audits</h2><ul><li><a href="audits/2026-09-14-security-review.html">2026 09 14 Security Review</a></li></ul></div>
+</div>
+</nav>
+<main>
+<h1 id="nancy-ssil--orientation-for-agents">NanCy SSIL — orientation for agents</h1>
+<p>OpenClaw plugin. Logic is split across modules under <code>src/</code> (see the module map below); <code>src/index.ts</code> is now just plugin registration and <code>api.on(...)</code> hook wiring, calling into the other modules&#39; factory functions. Read <code>README.md</code> for the full feature writeup; this file is just the fast-orientation summary.</p>
+<h2 id="what-this-is">What this is</h2>
+<p>NanCy is a security guard plugin for the <strong>OpenClaw</strong> autonomous agent runtime (not for Claude Code itself — this repo <em>builds</em> NanCy, it doesn&#39;t run under it). It intercepts OpenClaw&#39;s tool calls and outbound messages, runs a one-shot LLM judgment against a user-confirmed task, and blocks/allows/clarifies based on the verdict. Core idea: &quot;the agent only asks, NanCy decides&quot; — the agent cannot write its own confirmation; NanCy writes per-task audit records and grants authorization in memory to the exact worker session it creates.</p>
+<p>Status: early-stage and &quot;research and development only&quot; per README&#39;s warning banner. A repository-wide security review was completed on 2026-09-14 and its reproduced findings were corrected, but this is not a production-safety guarantee.</p>
+<h2 id="architecture-module-map--see-todomd-for-the-full-rationale">Architecture (module map — see TODO.md for the full rationale)</h2>
+<ul>
+<li><code>src/index.ts</code> — <code>definePluginEntry({...})</code>, registers all OpenClaw hooks (<code>before_tool_call</code>, message hooks, etc.), wires the factories below together with <code>api</code>/<code>nancyConfig</code>/log paths.</li>
+<li><code>src/config.ts</code> — <code>NancyConfig</code>/<code>AnalysisConfig</code>/<code>DomainConfig</code> types, secret/model-ref resolution.</li>
+<li><code>src/analysis/client.ts</code> — <code>callLlm()</code>, the one-shot analysis call (provider-agnostic: gemini/openai/anthropic/openai-compat), including provider completion-status validation and output caps.</li>
+<li><code>src/analysis/verdict.ts</code> — strict two-line ALLOW/BLOCK/CLARIFY parsing.</li>
+<li><code>src/analysis/context.ts</code> — builds the Intent Anchoring prompt context (confirmed task, recent calls/reasoning, protected-files list).</li>
+<li><code>src/analysis/macro-review.ts</code> — the periodic behavioral review (feature #9), every 10 calls by default; cadence is configurable (<code>macroReview</code> in <code>openclaw.plugin.json</code>) as fixed or randomized (triangular distribution) via <code>pickNextMacroReviewInterval()</code>. Reviews receive bounded call metadata and recent denial reasons, and their result is discarded if the session generation changes while the review is in flight.</li>
+<li><code>src/policy/domain-policy.ts</code> — <code>checkDomainBorder()</code> / authenticated URLhaus reputation / RDAP domain-age — Domain Border Control (feature #3), with canonical hostname handling and no clean cache entry for indeterminate reputation results.</li>
+<li><code>src/policy/operator-policy.ts</code> — built-in minimum policy plus fresh loading of the protected root <code>NANCY-POLICY.md</code> for every reviewer call.</li>
+<li><code>src/policy/protected-paths.ts</code> — resolves per-agent workspace/protected paths and <code>protectedWriteTarget()</code>, including canonical real paths and case-insensitive Windows aliases. Protected and unconditionally blocked for <code>write</code>/<code>edit</code>: <code>AGENTS.md</code>, <code>IDENTITY.md</code>, <code>MEMORY.md</code>, the whole <code>nancy/src/</code> directory (not just <code>index.ts</code> — NanCy&#39;s logic is split across all of it), <code>openclaw.plugin.json</code>, anything under <code>tasks/</code>.</li>
+<li><code>src/policy/tool-policy.ts</code> — main/cron default-deny allowlist, browser action classification, and <code>shouldAnalyze()</code>. Every <code>exec</code> call is reviewed; unknown browser actions and credential-bearing reads fail into review rather than bypassing it.</li>
+<li><code>src/policy/denial-policy.ts</code> — normalized denial classification, runtime-scoped total/burst counters, deterministic termination, and burst-review triggering.</li>
+<li><code>src/confirmation/protocol.ts</code> — <code>parseConfirmationRequest()</code> / <code>isAffirmativeReply()</code> — intent confirmation flow (feature #2).</li>
+<li><code>src/confirmation/gap-detection.ts</code> — advisory-only LLM check flagging unspecified decision points in a proposed confirmation before the human sees it (feature #2&#39;s other half). See <code>docs/architecture/gap-detection.md</code>.</li>
+<li><code>src/confirmation/tasks.ts</code> — per-session confirmed-task authorization and pending-confirmation state.</li>
+<li><code>src/workers/worker-manager.ts</code> — spawns/waits-for/cleans-up the isolated worker session per confirmed task.</li>
+<li><code>src/notifications/telegram.ts</code> — Telegram alerting/status pushes, block-alert debounce.</li>
+<li><code>src/browser/snapshot.ts</code> — <code>fetchBrowserSnapshot()</code> and snapshot file naming/pruning — DOM Biopsy (feature #5).</li>
+<li><code>src/logging/logger.ts</code> — <code>logDecision()</code>, log rotation.</li>
+<li><code>src/state.ts</code> — per-session state: bounded recent call/reasoning/denial ring buffers, cron-trigger correlation, call/denial counters, macro-review serialization, session-generation tokens, termination flags.</li>
+<li>Config schema lives in <code>openclaw.plugin.json</code> (<code>analysis</code>, <code>browser</code>, <code>domains</code>, <code>macroReview</code>, <code>limits</code>, <code>mainSessionKey</code>, <code>mainSessionIdleMinutes</code>, <code>workerAgentId</code>, <code>telegramAlerts</code>, <code>testMode</code>).</li>
+</ul>
+<h2 id="feature-status-see-readme-key-technical-features-for-full-detail">Feature status (see README §&quot;Key Technical Features&quot; for full detail)</h2>
+<p>✅ implemented: SSIL one-shot analysis (#1), intent confirmation &amp; gap detection (#2), Domain Border Control (#3), main/worker session split (#7, optional), behavioral review plus deterministic denial termination (#8), permanent operator policy (#9), write-protection for core files (#6).</p>
+<p>🧭 not implemented: Contextual Scrambler / dedicated prompt-injection defense (#4).</p>
+<p>⚠️ lighter than described: DOM Biopsy (#5) — page-level snapshot only, not element-level HTML parsing.</p>
+<h2 id="recent-focus-see-git-log-for-detail">Recent focus (see <code>git log</code> for detail)</h2>
+<p>Work has been on the operational/runtime side: cron-triggered runs are gated like the main session, <code>testMode</code> dry-runs full tasks with zero real side effects, and Telegram alerting distinguishes operator pages from logged denials. <code>allowUnconfirmedInfoLookups</code> (default on) lets <code>web_search</code>/<code>web_fetch</code> reach the real reviewer with no confirmed task, judged against a fixed generic &quot;harmless info lookup only&quot; baseline; a deterministic fixed one-hour per-session window (<code>unconfirmedInfoLookupLimitPerHour</code>) caps those grants. The 2026-09-14 review also made required reviews fail closed, moved every shell command into semantic review, rejected duplicate task IDs, and invalidated in-flight authorization decisions when their session ends or changes generation.</p>
+<h2 id="logs--runtime-artifacts-not-source-dont-treat-as-code">Logs &amp; runtime artifacts (not source, don&#39;t treat as code)</h2>
+<ul>
+<li><code>nancy.log</code> — general plugin log</li>
+<li><code>nancy-analysis.log</code> — LLM analysis verdicts</li>
+<li><code>snapshots/</code> — browser DOM snapshots</li>
+</ul>
+<h2 id="docs-map">Docs map</h2>
+<ul>
+<li><code>README.md</code> — full feature list, config, getting-started (includes the <code>AGENTS.md</code> snippet NanCy expects the <em>target</em> OpenClaw agent to have — that&#39;s a different file in a different repo, not this one)</li>
+<li><code>SECURITY-PHILOSOPHY.md</code> — &quot;limit the blast radius&quot; deployment guidance</li>
+<li><code>NANCY-POLICY.md</code> — standing operator restrictions included in every security judgment</li>
+<li><code>INCIDENTS.md</code> — sourced public incidents and scoped counterfactual analysis of where NanCy might help</li>
+<li><code>HOW-AGENTS-GO-WRONG.md</code> — plain-language failure scenarios, the NanCy layers that may reduce each risk, and residual limitations</li>
+<li><code>MISCONCEPTIONS.md</code> — objections/FAQ (collusion, agent talking to NanCy directly, AI-reviewer bias)</li>
+<li><code>RELATED-WORK.md</code> — positioning vs. LlamaFirewall AlignmentCheck, ClawGuard, Google ADK hooks</li>
+<li><code>docs/architecture/denial-escalation-and-clarification.md</code> — implemented denial ceiling/burst-review rules plus the not-yet-implemented ticketed clarification design; includes state transitions, release conditions, and tests</li>
+<li><code>docs/architecture/gap-detection.md</code> — design rationale for the advisory unspecified-decision-point check (feature #2&#39;s gap-detection half): prompt design, failure modes, config, and known limitations</li>
+<li><code>docs/architecture/policy-precedence.md</code> — exactly which decision prompts explicitly name a standing-policy violation as its own BLOCK trigger (vs. relying on context alone), and which deliberately don&#39;t yet — read before editing any <code>Use BLOCK when...</code> sentence in <code>src/index.ts</code></li>
+<li><code>docs/architecture/debate-review.md</code> — experimental optional FOR/AGAINST/JUDGE full review, implemented in <code>src/analysis/debate.ts</code>; <code>analysis.debateMode</code> defaults to off. Every mode fails closed on full-review errors, including outbound messages. Comparative real-model evaluation remains outstanding.</li>
+<li><code>docs/audits/2026-09-14-security-review.md</code> — repository-wide security review, reproduced findings, corrections, and verification evidence.</li>
+<li><code>TESTING.md</code> — how to test changes: <code>npm test</code> (mocked, fast) vs. a standalone harness against the real reviewer model (genuine verdicts, zero live-gateway risk), the confirmed-task file format, and why the live gateway must never be stopped/restarted for testing</li>
+<li><code>EVAL-RESULTS.md</code> — generated report from <code>scripts/run-eval.mts</code> (a fixed, hand-written scenario set in <code>scripts/eval-scenarios.json</code>, run against the real configured reviewer model via the Option B pattern). Regenerate with <code>node --experimental-strip-types scripts/run-eval.mts</code>; re-run whenever <code>analysis.model</code> or the policy/analysis modules change, to catch reviewer-behavior regressions.</li>
+</ul>
+
+<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit 4a3103f. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
+</main>
+</div>
+</body>
+</html>

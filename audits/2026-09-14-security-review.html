@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>2026 09 14 Security Review — NanCy SSIL</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1a1a1a; --muted: #5b6472; --border: #e2e5ea;
+  --accent: #7c3aed; --code-bg: #f4f4f7; --nav-bg: #fafafa;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14161c; --fg: #eef0f4; --muted: #9aa3b2; --border: #2a2e38;
+    --accent: #b794f6; --code-bg: #1c1f27; --nav-bg: #191b22;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); }
+.layout { display: flex; min-height: 100vh; }
+nav.sidebar { width: 260px; flex-shrink: 0; background: var(--nav-bg); border-right: 1px solid var(--border); padding: 24px 16px; }
+nav.sidebar h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 20px 0 6px; }
+nav.sidebar ul { list-style: none; margin: 0; padding: 0; }
+nav.sidebar li a { display: block; padding: 4px 8px; border-radius: 6px; text-decoration: none; color: var(--fg); font-size: 14px; }
+nav.sidebar li a[aria-current="page"] { background: var(--accent); color: #fff; }
+nav.sidebar li a:hover { background: var(--border); }
+.brand { font-weight: 700; font-size: 18px; margin-bottom: 4px; }
+.brand-sub { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+main { flex: 1; min-width: 0; padding: 40px clamp(16px, 5vw, 64px); max-width: 860px; }
+main h1:first-child { margin-top: 0; }
+pre { background: var(--code-bg); padding: 14px 16px; overflow-x: auto; border-radius: 8px; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; overflow-x: auto; display: block; }
+th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+blockquote { border-left: 3px solid var(--accent); margin: 0; padding: 0 16px; color: var(--muted); }
+img { max-width: 100%; }
+footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+#nav-toggle { display: none; }
+.nav-toggle-label { display: none; }
+@media (max-width: 800px) {
+  .layout { display: block; }
+  nav.sidebar { width: auto; border-right: none; border-bottom: 1px solid var(--border); }
+  #nav-toggle:not(:checked) ~ .layout nav.sidebar .nav-body { display: none; }
+  .nav-toggle-label { display: block; padding: 16px; cursor: pointer; font-weight: 600; }
+}
+</style>
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="layout">
+<nav class="sidebar">
+<label class="nav-toggle-label" for="nav-toggle">☰ Docs menu</label>
+<div class="nav-body">
+<div class="brand">NanCy SSIL</div>
+<div class="brand-sub"><a href="https://github.com/fxg55647/NanCy">GitHub ↗</a></div>
+<div class="nav-group"><h2>Overview</h2><ul><li><a href="../index.html">NanCy SSIL</a></li><li><a href="../claude.html">CLAUDE</a></li><li><a href="../how-agents-go-wrong.html">HOW AGENTS GO WRONG</a></li><li><a href="../incidents.html">INCIDENTS</a></li><li><a href="../misconceptions.html">MISCONCEPTIONS</a></li><li><a href="../nancy-policy.html">NANCY POLICY</a></li><li><a href="../related-work.html">RELATED WORK</a></li><li><a href="../security-philosophy.html">SECURITY PHILOSOPHY</a></li><li><a href="../testing.html">TESTING</a></li></ul></div><div class="nav-group"><h2>Architecture</h2><ul><li><a href="../architecture/debate-review.html">Debate Review</a></li><li><a href="../architecture/denial-escalation-and-clarification.html">Denial Escalation And Clarification</a></li><li><a href="../architecture/gap-detection.html">Gap Detection</a></li><li><a href="../architecture/policy-precedence.html">Policy Precedence</a></li></ul></div><div class="nav-group"><h2>Audits</h2><ul><li><a href="2026-09-14-security-review.html" aria-current="page">2026 09 14 Security Review</a></li></ul></div>
+</div>
+</nav>
+<main>
+<h1 id="nancy-laaja-bugitarkistus-1492026">NanCy: laaja bugitarkistus 14.9.2026</h1>
+<p>Tarkastettu commit: <code>cfa07f015bb3f8e5455fa0af141701951f65da7a</code>.</p>
+<p>Tämä raportti kuvaa commitista <code>cfa07f0</code> löydettyä tilannetta. Tarkistus löysi useita deterministisiä ohituksia: kaikki ongelmat eivät edellyttäneet, että hyökkääjä onnistuu huijaamaan arvioivaa kielimallia.</p>
+<h2 id="korjaustila-1492026">Korjaustila 14.9.2026</h2>
+<p>Kaikki löydökset A01–A16 on korjattu nykyisessä työpuussa ja muutettu pysyviksi regressiotesteiksi tiedostoon <code>test/security-audit-regressions.test.ts</code> tai niitä lähellä olevaan olemassa olevaan testiin. Tyyppitarkistus ja <strong>130/130 testiä</strong> läpäisevät. A14 varmennettiin lisäksi korjauksen jälkeen asennetun OpenClawin oikealla hook-ajurilla: 16 sekuntia viivästetty BLOCK odotettiin loppuun ja viesti peruttiin noin 16,3 sekunnissa vanhan 15 sekunnin fail-open-palautuksen sijasta. Historialliset toistot ja niiden tarkemmat perustelut säilyvät alempana, jotta muutosten syy ei katoa.</p>
+<p>Korjauksiin kuuluvat hookien kokonaisaikabudjetit ja ulkoreunan fail-closed-käsittely, vahvistusviestin tarkastus ja lähettäjä-/kanavasidonta, task-ID:n ylikirjoituksen esto, session generation -tarkistus, default-to-review selain- ja exec-polut, kanoniset polut ja domainit, välilehteen sidottu snapshot, denial-historia, tiukka verdict-parseri, providerin completion-tilan tarkistus, URLhaus Auth-Key, näkyvät Telegram-virheet sekä liian pitkän operator-policyn hylkäys.</p>
+<p>OpenClawin koko toimituspolun fail-closed-käytös varmistettiin myös asennetun oikean hook-ajurin testillä. NanCyn viestihookin 95 sekunnin aikabudjetti on nyt OpenClawin 120 sekunnin ulkorajaa lyhyempi: 16 sekuntia viivästetty BLOCK odotettiin loppuun ja viesti peruttiin noin 16,3 sekunnissa.</p>
+<h2 id="laajuus-ja-menetelmä">Laajuus ja menetelmä</h2>
+<ul>
+<li>Luin kaikki 22 tiedostoa <code>src/</code>-hakemistossa: hookit, vahvistukset, workerit, session tila, policyt, domainit, kaikki analyysit, provider-clientin, browser-snapshotit, lokituksen ja ilmoitukset.</li>
+<li>Vertailin toimintaa config-skeemaan, READMEhen, arkkitehtuuridokumenttiin ja testauksen ohjeisiin.</li>
+<li>Tarkastin nykyisten testien kattavuutta ja molempia eval-skriptejä. Tarkistus ei ole OpenClawin kaikkien riippuvuuksien auditointi.</li>
+<li>Tarkistin asennetusta OpenClawista selaimen <code>wait</code>/JavaScript-polun, hookien timeoutit ja failure-policyt sekä tiedostotyökalujen parametrien validoinnin.</li>
+<li>Ajoin <code>npm run check</code>: tyyppitarkistus onnistui ja <strong>113/113 testiä läpäisi</strong>.</li>
+<li>Lisäsin erilliset auditointitoistot, jotka käyttävät fake-hostia, tilapäisiä hakemistoja ja mockattua HTTP:tä. Yhtään testin esimerkkikomentoa ei suoriteta shellissä eikä viestiä lähetetä oikealle vastaanottajalle.</li>
+<li><code>scripts/audit-repro.mts</code>: <strong>16 onnistunutta toistoa</strong>, jotka kattavat 15 raportin kohtaa. A04 testataan erikseen työkaluille ja viesteille.</li>
+<li><code>scripts/audit-host-timeout.mts</code>: <strong>yksi lisätoisto</strong> asennetun OpenClawin oikealla hook-ajurilla. A14 toistui noin 15 036 millisekunnissa, ennen Nancyn myöhempää estoa.</li>
+<li>URLhausin nykyinen Auth-Key-vaatimus tarkistettiin palvelun omasta dokumentaatiosta. Palveluun ei lähetetty yksityisiä URL-osoitteita eikä ladattu haittaohjelmia.</li>
+</ul>
+<p>Auditointiskriptit todentavat nykyisen haavoittuvan käyttäytymisen. Niiden onnistuminen tarkoittaa <strong>bugin toistumista</strong>, ei turvallisuustestin läpäisyä. Korjausten jälkeen ne tulee muuttaa tavallisiksi regressiotesteiksi, jotka odottavat turvallista tulosta.</p>
+<h2 id="korjausjärjestys">Korjausjärjestys</h2>
+<p>P1 tarkoittaa tässä konkreettista turvallisuusrajan puutetta, joka tulisi korjata ennen kuin kyseiseen suojaan luotetaan. Se ei tarkoita, että jokainen asennus olisi hyväksikäytettävissä: esimerkiksi OpenClawin omat työkalurajoitukset, eristetyt kanavat ja tiedostojärjestelmän oikeudet voivat katkaista saman hyökkäyksen muualla.</p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Prioriteetti</th>
+<th>Löydös</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>A14</td>
+<td>P1</td>
+<td>OpenClawin 15 s viestihook-timeout ohittaa Nancyn myöhemmän BLOCKin</td>
+</tr>
+<tr>
+<td>A01</td>
+<td>P1</td>
+<td>Vahvistusviestin muoto antaa tarkastamattoman lähetyspoikkeuksen</td>
+</tr>
+<tr>
+<td>A05</td>
+<td>P1</td>
+<td>Selaimen <code>act:wait</code> voi suorittaa JavaScriptiä ilman Nancyn tarkastusta</td>
+</tr>
+<tr>
+<td>A06</td>
+<td>P1</td>
+<td>SAFE_EXEC hyväksyy muitakin ohjelmia ja muuttavia komentoja</td>
+</tr>
+<tr>
+<td>A03</td>
+<td>P1</td>
+<td>Agentin valitseman tehtävä-ID:n törmäys vaihtaa workerin valtuutuksen</td>
+</tr>
+<tr>
+<td>A04</td>
+<td>P1</td>
+<td>Keskeneräinen tarkastus voi sallia toiminnon session pysäytyksen jälkeen</td>
+</tr>
+<tr>
+<td>A07</td>
+<td>P1</td>
+<td>Suojattujen polkujen vertailu ohitetaan kirjainkoolla tai junctionilla</td>
+</tr>
+<tr>
+<td>A02</td>
+<td>P1, ehdollinen</td>
+<td>Vahvistajan henkilöllisyyttä ei sidota pyyntöön</td>
+</tr>
+<tr>
+<td>A09</td>
+<td>P1</td>
+<td>Selainkonteksti voidaan lukea eri välilehdeltä kuin toiminto</td>
+</tr>
+<tr>
+<td>A15</td>
+<td>P1</td>
+<td>URLhaus-kutsusta puuttuu nykyisin vaadittu Auth-Key</td>
+</tr>
+<tr>
+<td>A08</td>
+<td>P2</td>
+<td>Domainin loppupiste ohittaa deny-listan</td>
+</tr>
+<tr>
+<td>A10</td>
+<td>P2</td>
+<td>Varhain estetyt yritykset puuttuvat käytösarvioijan aineistosta</td>
+</tr>
+<tr>
+<td>A11</td>
+<td>P2</td>
+<td>Tavallinen verdict-parser hyväksyy rikkinäisen ALLOW-vastauksen</td>
+</tr>
+<tr>
+<td>A16</td>
+<td>P2</td>
+<td>Providerin katkaistu vastaus voidaan hyväksyä valmiina tuomiona</td>
+</tr>
+<tr>
+<td>A12</td>
+<td>P2</td>
+<td>Telegramin HTTP-virheet jäävät huomaamatta</td>
+</tr>
+<tr>
+<td>A13</td>
+<td>P2</td>
+<td>Pitkän operator-policyn loppuosan rajoitukset jäävät soveltamatta</td>
+</tr>
+</tbody></table>
+<h2 id="a14--isäntäohjelman-timeout-tekee-viestitarkastuksesta-fail-openin">A14 — Isäntäohjelman timeout tekee viestitarkastuksesta fail-openin</h2>
+<p><strong>Paikat:</strong> <code>src/index.ts</code> (<code>message_sending</code>-rekisteröinti), <code>src/analysis/debate.ts</code> (<code>timeoutMs = 60_000</code>), <code>src/constants.ts</code> (30 s provider-timeout). Asennettu <code>node_modules/openclaw/dist/hook-runner-global-BhDCl4qm.mjs</code>: oletustimeoutit noin rivillä 460, virhekäytös noin rivillä 501 ja globaali failure-policy noin rivillä 1391.</p>
+<p>OpenClaw antaa <code>message_sending</code>-hookille oletuksena 15 sekuntia. NanCy ei rekisteröi pidempää timeoutia. OpenClawin globaali hook-ajuri asettaa <code>before_tool_call</code>-hookin fail-closed-tilaan, mutta ei tee samaa <code>message_sending</code>-hookille. Viestitarkastuksen aikakatkaisu johtaa siksi siihen, että ajuri palauttaa ilman <code>cancel: true</code> -tulosta.</p>
+<p><strong>Toisto:</strong> oikealle hook-ajurille rekisteröitiin NanCy fake-hostissa, <code>debateMode: always</code>. Molempien analyytikkojen HTTP-vastaus viivästettiin mockissa 16 sekuntiin. Ajuri palautti noin 15 sekunnissa <code>undefined</code>. NanCy palautti myöhemmin <code>cancel: true</code>, mutta ajurin päätös oli jo tehty. Malli ei antanut väärää ALLOW-tuomiota: se päätyi BLOCKiin liian myöhään.</p>
+<p>Tämä koskee myös tavallista tarkastusta, jonka HTTP-timeout on 30 sekuntia. Triple-pass ja peräkkäiset preflightit kasvattavat altistavaa kokonaisviivettä. Työkalupuolella sama epäsuhta aiheuttaa ennenaikaisia virheitä/estoja; tarkistetun globaalin failure-policyn perusteella en väitä työkalujen päästävän läpi timeoutista.</p>
+<p><strong>Korjaus:</strong> määritä koko hookille yksi hallittu aikabudjetti, joka kattaa myös preflightit, snapshotin ja gap-checkin. Sen on päätyttävä turvalliseen palautusarvoon ennen isännän timeoutia. Sovita lisäksi rekisteröinnin timeout isäntään ja varmista viestihookin failure-policy. Pelkkä <code>reviewAction</code>-funktion catch ei riitä. Harkitse myös hookin ulkoreunan poikkeuskäsittelyä: lokikirjoituksen virhe ennen sisäistä try-lohkoa voi muuten päätyä samaan isännän fail-open-polkuun.</p>
+<p><strong>Hyväksymistesti:</strong> asennetulla oikealla hook-ajurilla testataan hidas provider, hidas preflight, snapshot-timeout ja sisäinen poikkeus. Jokaisessa viesti perutaan ennen host-deadlinea; myöhäinen BLOCK ei kelpaa onnistumiseksi.</p>
+<h2 id="a01--vahvistusmuoto-on-tarkastamaton-lähetyskanava">A01 — Vahvistusmuoto on tarkastamaton lähetyskanava</h2>
+<p><strong>Paikat:</strong> <code>src/index.ts</code> noin 252–329; <code>src/confirmation/protocol.ts</code>.</p>
+<p><code>Formal confirmation: ...</code> -muodon täsmätessä sisältö palautetaan lähetettäväksi ennen cron-eston, workerin valtuutuksen ja tavallisen viestitarkastuksen suorittamista. Kuvauksen sisältö on vapaata agentin tekstiä. Koodi ei tarkista, että vastaanottaja on tehtävän vahvistava käyttäjä. Gap detection ei ole turvallisuusesto ja sen saa pois päältä.</p>
+<p><strong>Toisto:</strong> cron-sessio lähetti vahvistusmuotoon puetun synteettisen salaisuuden ulkoiseksi nimettyyn vastaanottajaan <code>testMode: true</code> -tilassa. Hook palautti <code>undefined</code>, HTTP-kutsuja tehtiin nolla. Tässä ei väitetä oikean sähköpostin lähettämistä; todistettu asia on Nancyn toimitusestojen ohitus.</p>
+<p><strong>Vaikutus:</strong> hyökkääjän ei tarvitse saada reviewerilta ALLOW-tuomiota, jos worker voi tuottaa sopivanmuotoisen lähtevän viestin. Sama poikkeus rikkoo testimoodin väitteen siitä, että vain turvallinen kiinteä kysymys lähetetään oikeasti.</p>
+<p><strong>Korjaus:</strong> koodin omistama vahvistuslähetys luotettuun, inbound-kontekstista sidottuun käyttäjäkanavaan. Vapaata kuvausta ei pidä käsitellä vaarattomana pelkän ympäröivän templaten takia. Cron- ja worker-rajoitukset pitää ratkaista ennen poikkeusta. Tarvitaan erillinen sääntö sille, mitä dataa vahvistuskuvaus saa sisältää.</p>
+<p><strong>Hyväksymistesti:</strong> sama template väärälle vastaanottajalle, cronista ja vanhentuneesta workerista estetään ilman reviewer-kutsua; oikea käyttäjävahvistus toimii edelleen.</p>
+<h2 id="a05--selaimen-wait-ei-aina-ole-passiivinen">A05 — Selaimen wait ei aina ole passiivinen</h2>
+<p><strong>Paikka:</strong> <code>src/policy/tool-policy.ts</code>, <code>BROWSER_INTERACTIVE_ACT_KINDS</code> ja <code>shouldAnalyzeBrowser</code>.</p>
+<p><code>wait</code> puuttuu tarkastettavien act-kindien joukosta. Asennetun OpenClawin <code>pw-ai-DlOziW9s.mjs</code> kuitenkin välittää <code>wait.fn</code>-arvon Playwrightin <code>waitForFunction</code>-polkuun. Se on JavaScript-suoritus, jossa voi olla sivuvaikutuksia. OpenClaw estää sen, jos <code>browser.evaluateEnabled=false</code>; tämä on erillinen suoja, ei Nancyn toimiva tarkastus.</p>
+<p><strong>Toisto:</strong> <code>browser {action:&quot;act&quot;, kind:&quot;wait&quot;, fn:&quot;() =&gt; { document.body.textContent = &#39;changed&#39;; return true; }&quot;}</code> sai Nancylta luvan ilman vahvistettua tehtävää ja ilman analysis-configia. Esimerkkikoodia ei ajettu selaimessa. Varsinainen hostin dispatch tarkistettiin lähdekoodista.</p>
+<p><strong>Korjaus:</strong> myös selaimen alitoiminnoissa default-to-review. Luettele vain tunnetut aidosti passiiviset muodot. Pelkän <code>wait</code>-nimen hyväksyminen ei riitä; <code>fn</code> muuttaa sen luonteen. Unknown action/kind ei saa palauttaa automaattisesti <code>false</code>.</p>
+<p><strong>Hyväksymistesti:</strong> wait+fn, tuntematon act-kind ja tuntematon päätoiminto päätyvät reviewiin tai taskittomana estoon. Pelkkä ajallinen odotus voidaan hyväksyä erikseen.</p>
+<h2 id="a06--safe_exec-ei-tunnista-suoritettavaa-komentoa-riittävän-tarkasti">A06 — SAFE_EXEC ei tunnista suoritettavaa komentoa riittävän tarkasti</h2>
+<p><strong>Paikka:</strong> <code>src/policy/tool-policy.ts</code> noin 33–61.</p>
+<p>Regexin <code>\b</code> ei tarkoita komennon loppua. <code>echo-malicious</code> ja <code>ls/custom-program</code> alkavat hyväksytyllä sanalla ja sanarajalla. Lisäksi <code>date -s ...</code> muuttaa järjestelmän aikaa, jos prosessin oikeudet sallivat sen, ja <code>mkdir</code> muuttaa tiedostojärjestelmää jo tavallisillakin oikeuksilla. Nämä eivät ole yleisesti read-only-komentoja.</p>
+<p><strong>Toisto:</strong> kaikki neljä luokiteltiin tarkastusta tarvitsemattomiksi: <code>echo-malicious</code>, <code>ls/custom-program</code>, <code>date -s 2030-01-01</code>, <code>mkdir unauthorized-dir</code>. Niitä ei suoritettu.</p>
+<p><strong>Vaikutus:</strong> ei-main/cron-sessiossa taskittoman session esto ohitetaan, koska <code>requiresSemanticReview</code> on false. OpenClawin exec-approvals ja käyttöjärjestelmän oikeudet voivat estää varsinaisen suorituksen muualla.</p>
+<p><strong>Korjaus:</strong> pienin turvallinen muutos on poistaa tämä shell-poikkeus. Jos se säilytetään, tarvitaan oikea shellin/platformin mukainen komennon ja argumenttien tulkinta sekä sallittujen argumenttimuotojen lista. Ohjelmanimi yksin ei riitä.</p>
+<p><strong>Hyväksymistesti:</strong> suffixit, polut, muuttavat optiot ja eri shellien muodot eivät saa päästä valtuutuksetta läpi. Testaa myös OpenClawin todellisen exec-kontekstin kanssa.</p>
+<h2 id="a03--tehtävätunnuksen-törmäys-rikkoo-worker-eristyksen">A03 — Tehtävätunnuksen törmäys rikkoo worker-eristyksen</h2>
+<p><strong>Paikat:</strong> <code>src/workers/worker-manager.ts</code> noin 49–78; <code>src/confirmation/tasks.ts</code> <code>grantTask</code>; <code>message_received</code>.</p>
+<p>Workerin session-avain ja idempotency-avain johdetaan kokonaan agentin valitsemasta 6–10-numeroisesta ID:stä. Tunnuksen ainutkertaisuutta ei varmisteta. Kahden vahvistetun tehtävän samat ID:t luovat saman worker-avaimen, ja jälkimmäinen <code>grantTask</code> korvaa ensimmäisen tehtävän tiedot. Myös auditointitiedosto kirjoitetaan saman nimen päälle.</p>
+<p><strong>Toisto:</strong> kaksi eri chat-sessiota vahvisti saman ID:n eri kuvauksilla. Molemmat <code>run</code>-kutsut saivat saman session-avaimen. Ensimmäisen workerin avaimella tehty tarkastus näki SECOND_TASK-valtuutuksen. Riippuen hostin idempotenssista toinen run voi myös deduplikoitua; jo valtuutuksen ylikirjoitus tapahtuu ennen sitä.</p>
+<p><strong>Korjaus:</strong> luo NanCyssa sisäinen yksilöllinen grant/run-tunnus, jota agentti ei valitse. Ulkoinen kuvaustunnus voi jäädä korrelaatioksi. Älä korvaa aktiivista grantia. Cleanup saa perua vain täsmälleen sen grant-generationin, jonka kyseinen worker omistaa.</p>
+<p><strong>Hyväksymistesti:</strong> kaksi käyttäjää/sessiota, sama ulkoinen ID, eri tehtävät, rinnakkaiset runit ja eri järjestyksessä tapahtuva cleanup. Valtuutukset ja tiedostot eivät sekoitu.</p>
+<h2 id="a04--tarkastuksen-aikana-muuttunutta-valtuutusta-ei-tarkisteta-lopussa">A04 — Tarkastuksen aikana muuttunutta valtuutusta ei tarkisteta lopussa</h2>
+<p><strong>Paikka:</strong> <code>src/index.ts</code> hookien alkuportit ja ALLOW-palautuspolut noin 410–431 ja 836–869.</p>
+<p>Pysäytystila katsotaan hookin alussa. Sen jälkeen odotetaan ulkoisia palveluja. Toinen rinnakkainen kutsu voi sinä aikana ylittää denial-kynnyksen tai macro-review voi pysäyttää session. Ensimmäinen kutsu palauttaa silti ALLOWin. Samalla rakenteella tehtävän vanheneminen tai korvaaminen voi tehdä aiemmin luetusta tehtävästä vanhentuneen.</p>
+<p><strong>Toisto:</strong> HTTP-arvio pysäytettiin odottamaan. Saman session suojatun tiedoston kirjoitusyritys ylitti hard-limitin 1. Lokissa näkyi <code>hard_terminated</code>. Odottavalle arviolle annettiin sitten ALLOW: sekä työkaluhook että viestihook palauttivat ilman estoa.</p>
+<p><strong>Korjaus:</strong> tarkista juuri ennen sallivaa palautusta session stop-tila ja saman valtuutuksen voimassaolo/generation. Pelkkä mikä tahansa nykyinen tehtävä ei riitä, jos arvio tehtiin toiselle tehtävälle. Tarvitaan myös yhteistyö hostin execution-boundaryn kanssa, jotta jo myönnettyjä suorituksia koskeva takuu on täsmällinen.</p>
+<p><strong>Hyväksymistesti:</strong> pysäytys, session_end, taskin expiry ja korvaava grant tapahtuvat kesken preflightin/full-reviewin/debaten. Vanha kutsu ei saa palata sallivana.</p>
+<h2 id="a07--polkuvertailu-ei-vastaa-tiedostojärjestelmän-identiteettiä">A07 — Polkuvertailu ei vastaa tiedostojärjestelmän identiteettiä</h2>
+<p><strong>Paikka:</strong> <code>src/policy/protected-paths.ts</code> noin 72–89.</p>
+<p><code>path.resolve</code> normalisoi syntaksin, mutta ei Windowsin kirjainkokoa eikä junction/symlink-kohdetta. Map-vertailu on kirjainkoon suhteen tarkka. Windowsissa <code>agents.md</code> ja <code>AGENTS.md</code> voivat olla sama tiedosto, mutta vain jälkimmäinen vastaa suojauslistaa. Junctionin kautta samaan workspaceen päätyvä polku jää myös tunnistamatta.</p>
+<p><strong>Toisto:</strong> tilapäiseen workspaceen luotiin <code>AGENTS.md</code>. Sen sisältö voitiin lukea pienaakkosisella nimellä, mutta <code>protectedWriteTarget</code> palautti tälle null. Myös temp-hakemistoon luotu junction ohitti vertailun. Suojattuja tuotantotiedostoja ei kirjoitettu.</p>
+<p><strong>Korjaus:</strong> käytä hostin/filsystemin kanonista kohdeidentiteettiä. Huomioi luotavat tiedostot ratkaisemalla olemassa olevat vanhemmat, platformin case-säännöt sekä symlink-race. OS-tason kirjoitussuoja on edelleen tarpeen. Workerien pääsy muiden agenttien suojattuihin tiedostoihin on syytä kattaa samalla.</p>
+<p><strong>Hyväksymistesti:</strong> case-variantit Windowsissa, junction/symlink, suhteelliset ja absoluuttiset polut, apply_patchin derivedPaths sekä muiden agenttien suojatut kohteet.</p>
+<p><code>file_path</code>-parametria ei laskettu erilliseksi varmistetuksi ohitukseksi: tarkistettu nykyinen OpenClaw validoi näille työkaluille <code>path</code>-kenttää.</p>
+<h2 id="a02--saman-session-toinen-lähettäjä-voi-vahvistaa">A02 — Saman session toinen lähettäjä voi vahvistaa</h2>
+<p><strong>Paikat:</strong> <code>PendingConfirmation</code> ja <code>src/index.ts</code> <code>message_received</code> noin 481–509.</p>
+<p>Pending sisältää ID:n, kuvauksen, ajan ja mahdollisen viesti-ID:n, mutta ei vahvistajaa, tiliä tai kanavaa. <code>from</code> luetaan lokia varten; sitä ei verrata pyynnön vastaanottajaan. Session-avain ja ajoittain replyToId riittävät.</p>
+<p><strong>Toisto:</strong> ownerille osoitettua pyyntöä seurasi <code>yes</code> lähettäjältä other-person samassa session-avaimessa. Valtuutus syntyi ja kirjoituskutsu pääsi reviewerille. Tämä on konkreettinen ongelma, jos samaan sessioon voi kirjoittaa useampi identiteetti; eristetty yhden käyttäjän DM voi estää tilanteen jo hostissa.</p>
+<p><strong>Korjaus:</strong> sido pending luotettuun kanava-, account-, conversation- ja vahvistajaidentiteettiin. Määrittele ryhmissä, kuka saa vahvistaa. Ilman tarvittavia tietoja ei pidä väittää henkilöllisyyden olevan tarkistettu.</p>
+<p><strong>Hyväksymistesti:</strong> väärä henkilö, toinen tili/kanava ja väärä replyTo eivät myönnä eivätkä kuluta oikean käyttäjän pendingiä.</p>
+<h2 id="a09--snapshot-ei-kohdistu-tarkastettavan-toiminnon-välilehteen">A09 — Snapshot ei kohdistu tarkastettavan toiminnon välilehteen</h2>
+<p><strong>Paikat:</strong> <code>src/browser/snapshot.ts</code> <code>fetchBrowserSnapshot</code>; <code>src/index.ts</code> noin 762–789.</p>
+<p>Snapshot-pyyntö on aina <code>/snapshot?format=ai</code>. Funktio ei vastaanota toiminnon <code>targetId</code>, <code>profile</code>, <code>target</code> tai <code>node</code> -tietoja. OpenClawin selaintoiminto tukee kohdistusta eri välilehteen/profiiliin. Reviewer voi siten saada hyvän sivun tekstin, vaikka toiminto kohdistuu toiseen sivuun. Palautettua kohdeidentiteettiä ei myöskään verrata toiminnon identiteettiin.</p>
+<p><strong>Toisto:</strong> toiminto sisälsi <code>targetId: another-tab</code> ja <code>profile: another-profile</code>. Tallennettu snapshot-request ei sisältänyt kumpaakaan. Tämä todistaa kohdistustiedon katoamisen; todellista monivälilehtistä selainta ei käytetty.</p>
+<p><strong>Korjaus:</strong> välitä kohdistus samasta hostin auktoritatiivisesta sidonnasta kuin varsinainen toiminto. Epäonnistuva tai väärän kohteen snapshot ei saa muuttua uskottavaksi sivukontekstiksi. Arvioi myös snapshotin ja interaktion välinen sivun vaihtuminen.</p>
+<p><strong>Hyväksymistesti:</strong> kaksi välilehteä, eri profiilit, puuttuva kohde, vanhentunut kohde ja toiminnon aikana vaihtuva sivu. Väärän välilehden ALLOW ei kelpaa.</p>
+<h2 id="a15--urlhaus-integraation-autentikointi-on-vanhentunut">A15 — URLhaus-integraation autentikointi on vanhentunut</h2>
+<p><strong>Paikka:</strong> <code>src/policy/domain-policy.ts</code> noin 30–46; README keyless-väitteet.</p>
+<p>Nykyinen <a href="https://urlhaus-api.abuse.ch/">URLhausin API-dokumentaatio</a> vaatii HTTP <code>Auth-Key</code> -otsakkeen. NanCyn kutsu ei lisää sitä eikä configissa ole sille kenttää. HTTP-virhe palauttaa nullin, minkä jälkeen domain hyväksytään tämän tarkastuksen osalta. Ohjelma ei ilmoita, että oletuksena päällä oleva mainekerros on poissa toiminnasta.</p>
+<p><strong>Toisto:</strong> mock palautti 401 ja tarkisti, ettei requestissa ollut Auth-Keytä. <code>checkDomainBorder</code> palautti nullin. En tehnyt tässä oikeaa autentikoitua API-kyselyä; vaatimus vahvistettiin yllä olevasta ensisijaisesta lähteestä.</p>
+<p><strong>Korjaus:</strong> tuettu autentikointi ja secret-resoluutio, dokumentaation päivitys ja näkyvä degraded-status. Tarkista <code>query_status</code> sallittujen tulosten mukaan: jokainen muu kuin <code>ok</code> ei tarkoita puhdasta hostia. Määrittele erikseen, mikä palveluvirhe saa fail-open-käsittelyn.</p>
+<p><strong>Hyväksymistesti:</strong> onnistunut malicious/no_results, puuttuva/väärä avain, 401/429/5xx, tuntematon query_status ja verkkovirhe. Virhettä ei välimuistiteta onnistuneena puhtaana vastauksena.</p>
+<h2 id="a08--domainin-lopussa-oleva-piste-ohittaa-deny-listan">A08 — Domainin lopussa oleva piste ohittaa deny-listan</h2>
+<p><strong>Paikka:</strong> <code>src/policy/domain-policy.ts</code> <code>hostnameMatches</code>.</p>
+<p>Pienaakkostaminen ei poista DNS-juuren loppupistettä. <code>blocked.example.</code> ei täsmää <code>blocked.example</code>-sääntöön, vaikka se voi osoittaa samaan hostiin. Toistossa tavallinen muoto estettiin ja pisteellinen hyväksyttiin, reputationCheck pois päältä. Päinvastaisessa allow-list-tilassa vastaava ero aiheuttaa turhan eston.</p>
+<p><strong>Korjaus:</strong> kanonisoi sekä URL-hostit että config-patternit samalla tavalla, mukaan lukien loppupiste ja IDN-muodot. Testaa myös alidomainit ja varmista, ettei suffix-vertailu hyväksy samankaltaisia vääriä nimiä.</p>
+<h2 id="a10--denial-burstin-reviewer-ei-näe-sitä-laukaisevia-yrityksiä">A10 — Denial-burstin reviewer ei näe sitä laukaisevia yrityksiä</h2>
+<p><strong>Paikat:</strong> <code>src/index.ts</code> ennen <code>pushRecentCall</code>-kohtaa; <code>src/policy/denial-policy.ts</code>; <code>src/analysis/macro-review.ts</code>.</p>
+<p>Suojattujen polkujen, main/cron-portin ja domain-portin estot palautuvat ennen historiakirjausta. Denial-recorder lisää laskurin ja käynnistää macro-reviewin, mutta ei lisää sille turvallista päätöstietoa. Macro-promptissa ei ole denial-laskureitakaan. Myöhemmin historioitujen kutsujen tietueista puuttuu verdict/reasonCode.</p>
+<p><strong>Toisto:</strong> kolme <code>AGENTS.md</code>-kirjoitusyritystä laukaisi macro-reviewin. Sen promptissa oli <code>Recent tool calls (0 entries)</code>.</p>
+<p><strong>Korjaus:</strong> lisää bounded päätöshistoria: työkalu, kohteen turvallinen metadata, verdict ja reasonCode myös varhaisista estoista. Älä palauta kokonaisia viesti- tai tiedostosisältöjä historiaan. Macro-reviewille mukaan laskurit ja triggerin syy.</p>
+<p><strong>Hyväksymistesti:</strong> kolmannen varhaisen eston laukaisema reviewer näkee kolme denialia. Hard ceiling toimii siitä riippumatta kuten ennenkin.</p>
+<h2 id="a11--tavallisen-verdict-parserin-allow-on-liian-salliva">A11 — Tavallisen verdict-parserin ALLOW on liian salliva</h2>
+<p><strong>Paikka:</strong> <code>src/analysis/verdict.ts</code> noin 5–8.</p>
+<p>Parser etsii ensimmäisen osuman mistä tahansa vastausta. <code>VERDICT: ALLOWANCE</code> tulkitaan ALLOWiksi. Myös ensin lainattu ALLOW ja sen jälkeen varsinainen BLOCK päättyy ALLOWiin. Puuttuva reason ei estä sallivaa tulosta.</p>
+<p><strong>Toisto:</strong> molemmat yllä olevat muodot hyväksyttiin. Tämä on parserin virheellinen luottamus malformed-vastaukseen, ei todiste siitä, että tietty kielimalli tuottaisi sitä normaalisti.</p>
+<p><strong>Korjaus:</strong> yksi yhteinen tiukka, koko vastauksen validoiva formaatti kaikille päätösporteille. Virheellinen tai monituomioinen vastaus ei saa sallia toimintoa. Debate-tilassa on jo tiukempi parseri, mutta preflightit ja tavallinen tila käyttävät yhä tätä funktiota.</p>
+<h2 id="a16--katkaistu-provider-vastaus-hyväksytään-täydellisenä">A16 — Katkaistu provider-vastaus hyväksytään täydellisenä</h2>
+<p><strong>Paikat:</strong> <code>src/analysis/client.ts</code> provider-vastausten purku; <code>src/analysis/debate.ts</code> strictVerdict.</p>
+<p>Client hylkää providerin completion-status-tiedot ja palauttaa pelkän tekstin. Jos token-raja katkaisee vastauksen hyväksytyn kaksirivisen alun jälkeen, edes debate-polun syntaksivalidointi ei tunnista sitä keskeneräiseksi.</p>
+<p><strong>Toisto:</strong> OpenAI-mock palautti <code>finish_reason: length</code> sekä <code>VERDICT: ALLOW</code> ja keskeneräisen perustelun <code>Authorized only if</code>. <code>debateMode: clarify</code> hyväksyi tuloksen ALLOWina ilman eskalointia.</p>
+<p><strong>Korjaus:</strong> palauta clientistä strukturoitu tulos ja varmista provider-kohtainen normaali valmistuminen. Token-rajaan katkeaminen, refusal/safety-estot ja tyhjät contentit eivät saa muuttua valmiiksi sallivaksi päätökseksi. Tämä on erityisen tärkeää 300 tokenin output-rajalla.</p>
+<p><strong>Hyväksymistesti:</strong> normaalin stopin lisäksi OpenAI length, Anthropicin max_tokens ja Geminin vastaava finishReason testataan. Katkaistu muuten validin näköinen JSON/verdict hylätään.</p>
+<h2 id="a12--telegram-ilmoitus-voi-kadota-huomaamatta">A12 — Telegram-ilmoitus voi kadota huomaamatta</h2>
+<p><strong>Paikka:</strong> <code>src/notifications/telegram.ts</code> noin 6–13 ja <code>sendAlert</code>.</p>
+<p>Fetch ei heitä HTTP 400/401/429 -vastauksesta. <code>telegramAlert</code> ei tarkista <code>res.ok</code> eikä API:n <code>ok</code>-kenttää. Lisäksi parse_mode on Markdown, mutta mallin/agentin perustelut ja kuvaukset lisätään tekstiin ilman Markdown-escapingia. Toistossa mockin 400/ok:false palautui onnistuneena.</p>
+<p><strong>Korjaus:</strong> tarkista status ja API-vastaus, kirjaa toimitusvirhe ja käytä turvallista tekstimuotoa tai escapingia. Muotoiluvirheessä voidaan yrittää plain text -lähetystä. Älä tee rajatonta retryä 429-tilanteessa. Ilmoitusvirhe ei saa purkaa varsinaista estoa.</p>
+<h2 id="a13--operator-policyn-loppu-katkaistaan-pois">A13 — Operator-policyn loppu katkaistaan pois</h2>
+<p><strong>Paikka:</strong> <code>src/policy/operator-policy.ts</code> noin 27–34.</p>
+<p>16 000 merkin jälkeen olevat säännöt eivät päädy reviewiin. Reviewer saa katkaisumerkinnän mutta operaattori ei saa startup/config-virhettä. Toistossa loppuun lisätty <code>Never send confidential invoices</code> puuttui kokonaan policy-kontekstista. Tämä ei poista sisäänrakennettua minimiturvaa, mutta ohittaa operaattorin oman lisärajoituksen.</p>
+<p><strong>Korjaus:</strong> hylkää liian pitkä policy näkyvästi tai validoi se tallennettaessa. Pakollisia rajoituksia ei voi korvata katkaisulla. Myös olemassa olevan mutta lukukelvottoman policy-tiedoston ja aidosti puuttuvan valinnaisen tiedoston ero on syytä tehdä näkyväksi.</p>
+<h2 id="muut-tarkistuksessa-havaitut-rajoitukset-ja-jatkotestit">Muut tarkistuksessa havaitut rajoitukset ja jatkotestit</h2>
+<p>Näitä ei lasketa yllä oleviin erikseen toistettuihin bugeihin:</p>
+<ol>
+<li><strong>Levynkäyttö kasvaa gatewayn koko ajon ajan.</strong> Log rotation ja snapshot-pruning tapahtuvat käynnistyksessä, eivät jokaisella kirjoituksella tai ajastetusti. 20 MB / 1 000 tiedostoa eivät siis ole ajonaikaisia ylärajoja. Raakaviestit, tool-parametrit, llm_output ja snapshotit voivat myös sisältää salaisuuksia. Tarvitaan runtime-retentio, kokorajat ja selkeä pääsynhallinta.</li>
+<li><strong>Session elinkaari ja keskeneräiset macro-reviewit.</strong> <code>clearSession</code> poistaa in-flight-merkinnän mutta ei peruuta pyyntöä. Vanha reviewer voi myöhemmin kirjoittaa termination-tilan takaisin saman avaimen uudelle sessiolle. Tarvitaan generation-token tai cancellation ja siihen regressiotesti.</li>
+<li><strong>Workerin odotusluupin loppuminen.</strong> Kolmen timeoutin jälkeen worker jätetään eloon, mutta tämä watcher ei enää huomaa myöhempää valmistumista. Se on dokumentoitu valinta, mutta automaattinen cleanup/report ei ole silloin taattu. Uusi seuranta ei saa tappaa yhä ajavaa workeria.</li>
+<li><strong>Passiiviset lukutyökalut voivat lukea arkaluonteista dataa.</strong> <code>read</code> ohittaa reviewer-polun; shellin <code>cat ~/.ssh/id_rsa</code>-tarkistus ei sulje samaa tiedostoa <code>read</code>-työkalulta. Tämä kuuluu nykyiseen passive-read-malliin, mutta credential-polkutestin antamaa turvavaikutelmaa pitää rajata. Ulospäin lähettämisen suojat ovat tällöin erityisen tärkeitä.</li>
+<li><strong>Domain-portti ei ole verkkopalomuuri.</strong> Se näkee vain tarjotun URL:n. Redirectit, JS-verkkopyynnöt, clickistä seuraavat navigaatiot ja shellin verkkokutsut vaativat hostin/networkin suojat. Hostname mainepalveluun on myös ulkoinen lähetys, mahdollisesti sisäisen hostin nimellä.</li>
+<li><strong>Tiedonhakukiintiö on kiinteä ikkuna, ei liukuva tunti.</strong> Rajan molemmin puolin voi tehdä kaksinkertaisen määrän lyhyessä ajassa. Koodi kommentoi tämän, README käyttää rolling hour -sanamuotoa. Myös session vaihto luo uuden kiintiön. Tämä pitää dokumentoida täsmällisesti.</li>
+<li><strong>Evalit eivät yksin todista turvallisuutta.</strong> <code>run-eval.mts</code> kutsuu fake-hostin handlereita suoraan: juuri siksi A14 jäi piiloon. Sen classify ei tunnista kaikkia error/context-block-lokeja ja koko ajo voi silti päättyä exit 0:aan epäonnistuneilla odotuksilla. Kahdeksan tapauksen debate-eval on pieni synteettinen reviewer-testi, eikä kata hostin toimituspolkua, todellisia tokeneita/hintaa tai kaikkia reititysvirheitä.</li>
+<li><strong>Debaten hyötyä ei mitattu tässä.</strong> Kahden analyytikon riippumattomuus tarkoittaa erillisiä kutsuja, ei eri malliperheitä. Yhteiset virheet ja injektiot ovat edelleen mahdollisia. Oikean mallin vertailevaa evalia ei ajettu tässä auditoinnissa, eikä mock-testien määrä ole siitä korvike.</li>
+</ol>
+<h2 id="mikä-näytti-toimivan-tarkistetuissa-rajoissa">Mikä näytti toimivan tarkistetuissa rajoissa</h2>
+<ul>
+<li>Tehtävävaltuutus on muistissa session-avaimella, eikä agentin kirjoittama tasks-JSON yksin myönnä valtuutusta.</li>
+<li>Normaali ei-poikkeuksellinen kirjoitus suojattuun täsmäpolkuun estyy ennen LLM:ää.</li>
+<li>Tuntemattomat työkalunimet päätyvät yleensä reviewiin; browser-alitoiminnot ovat tästä tärkeä poikkeus.</li>
+<li>Main/cron-työkalujen allowlist on selkeä ja review-fallback on rajattu kahteen nimettyyn tiedonhakutyökaluun.</li>
+<li>Metadata-preflight ei normaalimuotoisilla parametreilla sisällä body/content/patch-kenttiä. Uudet metadata-isolation-testit läpäisivät.</li>
+<li>Hard denial ceiling ei tarvitse macro-reviewerin hyväksyntää. Sen ongelma on jo matkalla olevien kutsujen lopputarkastus, ei kynnyksen peruslaskenta.</li>
+<li>Debaten analyytikot käynnistyvät rinnakkain, tuomari saa alkuperäisen prompt-snapshotin ja molemmat analyysit, ja suoran funktion timeout/malformed-output-testit toimivat. Kokonaisjärjestelmän timeout pitää kuitenkin korjata erikseen.</li>
+</ul>
+<h2 id="ehdotettu-korjaustyön-jaksotus">Ehdotettu korjaustyön jaksotus</h2>
+<ol>
+<li><strong>Sulje deterministiset ohitukset:</strong> A14, A01, A05 ja A06. Lisää aidon host-ajurin integraatiotestit heti, jotta sisäisen funktion onnistuminen ei peitä ulkoista fail-openia.</li>
+<li><strong>Korjaa valtuutuksen identiteetti ja elinkaari:</strong> A03, A04 ja A02. Sisäinen yksilöllinen grant-tunnus, omistaja, voimassaolo ja generation yhdessä mallissa.</li>
+<li><strong>Korjaa kohteiden identiteetti:</strong> A07, A09 ja A08. Polku, välilehti ja domain eivät saa tarkoittaa tarkastuksessa eri asiaa kuin suorituksessa.</li>
+<li><strong>Palauta ulkoisten suojakerrosten luotettava toiminta:</strong> A15 ja A12. Virheestä näkyvä tila, ei hiljainen vaikutelma toimivasta suojasta.</li>
+<li><strong>Tiukenna päätösten ja aineiston käsittely:</strong> A10, A11, A16 ja A13. Yhteinen parseri, providerin valmistumistieto, bounded päätöshistoria ja policy-validointi.</li>
+<li>Aja regressiotestit ja host-integraatiotestit, sitten pieni real-model smoke-eval ja lopuksi vertailueval. Raportoi väärät ALLOWit erikseen virheistä, liian tiukoista estoista ja oikeista estoista.</li>
+</ol>
+<p>Alkuperäiset haavoittuvaa käyttäytymistä odottaneet reproskriptit poistettiin korjausten jälkeen. Niiden turvallista tulosta odottavat vastineet ovat tavallisessa testisarjassa. Tässä korjausvaiheessa ei käytetty oikeaa provider-mallia, selainta, gatewayta tai viestikanavaa eikä muutoksia commitoitu tai pushattu.</p>
+
+<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit 4a3103f. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
+</main>
+</div>
+</body>
+</html>

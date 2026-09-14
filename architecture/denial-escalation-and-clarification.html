@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Denial Escalation And Clarification — NanCy SSIL</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1a1a1a; --muted: #5b6472; --border: #e2e5ea;
+  --accent: #7c3aed; --code-bg: #f4f4f7; --nav-bg: #fafafa;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14161c; --fg: #eef0f4; --muted: #9aa3b2; --border: #2a2e38;
+    --accent: #b794f6; --code-bg: #1c1f27; --nav-bg: #191b22;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); }
+.layout { display: flex; min-height: 100vh; }
+nav.sidebar { width: 260px; flex-shrink: 0; background: var(--nav-bg); border-right: 1px solid var(--border); padding: 24px 16px; }
+nav.sidebar h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 20px 0 6px; }
+nav.sidebar ul { list-style: none; margin: 0; padding: 0; }
+nav.sidebar li a { display: block; padding: 4px 8px; border-radius: 6px; text-decoration: none; color: var(--fg); font-size: 14px; }
+nav.sidebar li a[aria-current="page"] { background: var(--accent); color: #fff; }
+nav.sidebar li a:hover { background: var(--border); }
+.brand { font-weight: 700; font-size: 18px; margin-bottom: 4px; }
+.brand-sub { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+main { flex: 1; min-width: 0; padding: 40px clamp(16px, 5vw, 64px); max-width: 860px; }
+main h1:first-child { margin-top: 0; }
+pre { background: var(--code-bg); padding: 14px 16px; overflow-x: auto; border-radius: 8px; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; overflow-x: auto; display: block; }
+th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+blockquote { border-left: 3px solid var(--accent); margin: 0; padding: 0 16px; color: var(--muted); }
+img { max-width: 100%; }
+footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+#nav-toggle { display: none; }
+.nav-toggle-label { display: none; }
+@media (max-width: 800px) {
+  .layout { display: block; }
+  nav.sidebar { width: auto; border-right: none; border-bottom: 1px solid var(--border); }
+  #nav-toggle:not(:checked) ~ .layout nav.sidebar .nav-body { display: none; }
+  .nav-toggle-label { display: block; padding: 16px; cursor: pointer; font-weight: 600; }
+}
+</style>
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="layout">
+<nav class="sidebar">
+<label class="nav-toggle-label" for="nav-toggle">☰ Docs menu</label>
+<div class="nav-body">
+<div class="brand">NanCy SSIL</div>
+<div class="brand-sub"><a href="https://github.com/fxg55647/NanCy">GitHub ↗</a></div>
+<div class="nav-group"><h2>Overview</h2><ul><li><a href="../index.html">NanCy SSIL</a></li><li><a href="../claude.html">CLAUDE</a></li><li><a href="../how-agents-go-wrong.html">HOW AGENTS GO WRONG</a></li><li><a href="../incidents.html">INCIDENTS</a></li><li><a href="../misconceptions.html">MISCONCEPTIONS</a></li><li><a href="../nancy-policy.html">NANCY POLICY</a></li><li><a href="../related-work.html">RELATED WORK</a></li><li><a href="../security-philosophy.html">SECURITY PHILOSOPHY</a></li><li><a href="../testing.html">TESTING</a></li></ul></div><div class="nav-group"><h2>Architecture</h2><ul><li><a href="debate-review.html">Debate Review</a></li><li><a href="denial-escalation-and-clarification.html" aria-current="page">Denial Escalation And Clarification</a></li><li><a href="gap-detection.html">Gap Detection</a></li><li><a href="policy-precedence.html">Policy Precedence</a></li></ul></div><div class="nav-group"><h2>Audits</h2><ul><li><a href="../audits/2026-09-14-security-review.html">2026 09 14 Security Review</a></li></ul></div>
+</div>
+</nav>
+<main>
+<h1 id="denial-escalation-and-clarification-architecture">Denial Escalation and Clarification Architecture</h1>
+<p>Status: <strong>Parts A and B are implemented with runtime-scoped counters. Part C is a design proposal and is not implemented.</strong> The current user-visible behavior remains the one described in <code>README.md</code>.</p>
+<h2 id="why-this-exists">Why this exists</h2>
+<p>NanCy evaluates individual consequential actions and periodically reviews a session&#39;s recent behavior. A reviewer verdict of <code>BLOCK</code> or <code>CLARIFY</code> stops that action, while a macro-review may terminate the session. Parts A and B added a deterministic upper bound and burst-triggered review. A worker still cannot pause mid-run to ask the operator a question and safely resume; Part C remains a proposal.</p>
+<p>The proposed change has three independent parts:</p>
+<ol>
+<li>a deterministic ceiling for security denials — <strong>implemented</strong>;</li>
+<li>an earlier macro-review when denials arrive in a burst — <strong>implemented</strong>; and</li>
+<li>an optional clarification workflow for confirmed worker tasks — <strong>design only</strong>.</li>
+</ol>
+<p>Parts 1 and 2 do not depend on clarification mode. Clarification mode must not be enabled until continuation correlation and duplicate-side-effect handling satisfy the requirements below.</p>
+<h2 id="current-behavior">Current behavior</h2>
+<ul>
+<li>Both <code>before_tool_call</code> and <code>message_sending</code> block a terminated session before further review.</li>
+<li>A <code>CLARIFY</code> verdict is treated as <code>BLOCK</code>; there is no mid-task dialogue with a worker.</li>
+<li>Periodic macro-review remains an LLM judgment, but an independent runtime counter terminates a session after the configured number of classified security denials.</li>
+<li>Macro-review receives bounded recent call metadata plus bounded denial reason codes and reasons. Raw attempted payloads are not copied into this history.</li>
+<li>Each session has a generation token. A macro-review result is applied only if the exact session still has the same generation, so a review that finishes after <code>session_end</code> cannot terminate or otherwise mutate a later reuse of the key.</li>
+<li>Session counters and termination flags are held in memory and cleared by <code>session_end</code> or a gateway restart.</li>
+<li>Confirmed workers are autonomous runs. The main chat does not have a live conversational connection to a worker while it runs.</li>
+</ul>
+<h2 id="safety-invariants">Safety invariants</h2>
+<p>The design must preserve these rules:</p>
+<ol>
+<li>A stopped or clarification-suspended session cannot execute tools or send outbound messages.</li>
+<li>Test-mode blocks and infrastructure failures never count as evidence of hostile worker behavior.</li>
+<li>A model cannot reset a denial count, issue a clarification ticket, choose its retry depth, or claim that an unrelated task is a continuation.</li>
+<li>A clarification never authorizes an action. It ends the current worker run; a revised task requires a new explicit user confirmation.</li>
+<li>A continuation cannot repeat an irreversible or externally visible action that the earlier run already completed.</li>
+<li>Macro-review concurrency cannot create two simultaneous reviews for one session or silently lose a required follow-up review.</li>
+<li>Main-session state is never stopped because a worker session requested clarification.</li>
+</ol>
+<h2 id="session-stop-states">Session stop states</h2>
+<p>Security termination and clarification suspension have different meanings and must remain distinguishable even if both use the same enforcement check.</p>
+<table>
+<thead>
+<tr>
+<th>State</th>
+<th>Meaning</th>
+<th align="right">Tools</th>
+<th align="right">Outbound messages</th>
+<th>Can continue</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>active</code></td>
+<td>Normal session</td>
+<td align="right">gated normally</td>
+<td align="right">gated normally</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>needs_clarification</code></td>
+<td>A confirmed worker hit an eligible <code>CLARIFY</code> verdict</td>
+<td align="right">blocked</td>
+<td align="right">blocked</td>
+<td>only as a newly confirmed worker task</td>
+</tr>
+<tr>
+<td><code>security_terminated</code></td>
+<td>Deterministic limit or macro-review ended the session</td>
+<td align="right">blocked</td>
+<td align="right">blocked</td>
+<td>no; a fresh task/session is required</td>
+</tr>
+<tr>
+<td><code>completed</code></td>
+<td>Worker finished</td>
+<td align="right">authorization revoked</td>
+<td align="right">blocked</td>
+<td>no</td>
+</tr>
+</tbody></table>
+<p>A generic boolean such as <code>terminatedSessions</code> may remain the final enforcement mechanism, but a separate trusted reason value must drive logging, reports, cleanup, and continuation rules.</p>
+<h2 id="part-a-deterministic-denial-ceiling">Part A: deterministic denial ceiling</h2>
+<p>Introduce one denial recorder used by every return path that blocks a tool or cancels a message. Each call records a stable <code>reasonCode</code> and a <code>securitySignal</code> boolean. Existing decision events may remain for compatibility; the denial event supplies the normalized classification and counters.</p>
+<p>Two counters are maintained per exact session key:</p>
+<ul>
+<li><code>securityDenialsTotal</code>: all security denials during the defined lifetime;</li>
+<li><code>securityDenialsBurst</code>: security denials since the last burst-triggered review.</li>
+</ul>
+<p>When <code>securityDenialsTotal</code> reaches <code>limits.hardTerminateThreshold</code> (default <code>20</code>), trusted code marks that exact session <code>security_terminated</code>. The action that reaches the limit remains blocked. NanCy writes a <code>hard_terminated</code> event and sends one non-debounced termination alert when alerts are enabled. Later attempts from the stopped session are blocked without incrementing the counters again.</p>
+<h3 id="denial-classification">Denial classification</h3>
+<p>The implementation must enumerate every denial path. New denial paths must choose a class explicitly rather than inheriting a default.</p>
+<p>Count as security signals:</p>
+<ul>
+<li>semantic reviewer <code>BLOCK</code>;</li>
+<li>semantic reviewer <code>CLARIFY</code>, including one converted into a clarification request;</li>
+<li>destination or browser-context rejection;</li>
+<li>a protected control-plane write, except the separately classified routine <code>tasks/</code> bookkeeping mistake;</li>
+<li>a state-changing call from the main session or a cron-triggered run;</li>
+<li>a worker tool call or outbound message with no live task authorization;</li>
+<li>a domain-policy rejection; and</li>
+<li>an outbound message rejected by the cron or task-authorization gate.</li>
+</ul>
+<p>Do not count as security signals:</p>
+<ul>
+<li>any <code>testMode</code> dry-run block;</li>
+<li>missing reviewer configuration;</li>
+<li>reviewer, browser-snapshot, reputation-service, or other infrastructure failure;</li>
+<li>an attempt from an already stopped session;</li>
+<li>the unconfirmed-info-lookup quota being exhausted; and</li>
+<li>an agent attempting routine task-file bookkeeping under <code>tasks/</code> after it has correctly emitted a confirmation request.</li>
+</ul>
+<p>The last exception remains logged. If later evidence shows that task-file writes are useful attack signals, their classification can change without altering the counter mechanism.</p>
+<h3 id="counter-lifetime-and-restart-behavior">Counter lifetime and restart behavior</h3>
+<p>Calling a counter “lifetime” is misleading if a gateway restart clears it. The first implementation must choose and document one of these semantics:</p>
+<ul>
+<li><strong>runtime-scoped:</strong> rename it accordingly and accept that restart resets it; or</li>
+<li><strong>durable:</strong> store counters and stop reasons atomically in a NanCy-owned, write-protected state file.</li>
+</ul>
+<p>The durable form is the target security behavior. It needs bounded retention, atomic replacement, schema versioning, and pruning after task expiry. Until that exists, documentation and logs must say “runtime denial count,” not imply a restart-resistant guarantee.</p>
+<h2 id="part-b-denial-burst-macro-review">Part B: denial-burst macro-review</h2>
+<p><code>macroReview.blockBurstThreshold</code> (default <code>3</code>) requests a macro-review when the burst counter reaches the threshold. The deterministic hard ceiling is checked first and does not depend on the macro-review result.</p>
+<p>Only one macro-review may run for a session at a time. A second request arriving during a review sets one pending-review flag. When the running review finishes, one new review uses the latest bounded history and clears that flag. This coalesces a burst without running concurrent reviewers or discarding the fact that another threshold was reached. Each review captures the session generation and checks it again before applying a verdict; a stale result is discarded after session cleanup or key reuse.</p>
+<p>After a burst review is accepted for execution:</p>
+<ul>
+<li>reset the burst counter;</li>
+<li>reset the normal call counter; and</li>
+<li>draw/store the next periodic threshold using the configured fixed or random cadence.</li>
+</ul>
+<p>The total denial counter is never reset by macro-review. A macro-review may still terminate sooner when it sees a clear sustained pattern.</p>
+<h2 id="part-c-optional-clarification-mode">Part C: optional clarification mode</h2>
+<p>Clarification mode is requested as part of the task confirmation and is allowed only when both of these are true:</p>
+<ul>
+<li><code>limits.clarifyMode.allowed</code> is enabled by the operator; and</li>
+<li>the user confirms a request containing <code>Clarify mode: on</code>.</li>
+</ul>
+<p>Omitting the line means <code>off</code>, preserving the current protocol. <code>BLOCK</code> never becomes interactive. Only a semantic <code>CLARIFY</code> verdict for an actively authorized worker is eligible. Direct, main, cron, unconfirmed-fallback, expired, and unauthorized sessions continue to fail closed without creating a clarification ticket.</p>
+<p>When an eligible <code>CLARIFY</code> occurs, NanCy must synchronously:</p>
+<ol>
+<li>block the current action;</li>
+<li>mark the exact task <code>needs_clarification</code>;</li>
+<li>suspend the exact worker session before it can call another tool or send a message;</li>
+<li>revoke its task authorization;</li>
+<li>create a random, one-use NanCy-owned clarification ticket;</li>
+<li>log only bounded structured context and the reviewer&#39;s reason; and</li>
+<li>notify the operator through the configured out-of-band channel.</li>
+</ol>
+<p>The worker is not resumed. After cleanup, any continuation runs in a new disposable worker session with a new task ID and a fresh user confirmation.</p>
+<h3 id="correlating-the-continuation">Correlating the continuation</h3>
+<p>A map containing only “the next confirmation in the main session” is unsafe. It can attach an unrelated new task to the wrong root, cannot represent two workers awaiting clarification at once, and can be reset by expiry or overwritten by a later ticket.</p>
+<p>NanCy therefore issues an opaque ticket ID and stores this trusted record:</p>
+<pre><code class="language-ts">{
+  ticketId,
+  rootTaskId,
+  priorTaskId,
+  depth,
+  issuedAt,
+  expiresAt,
+  mainSessionKey,
+  clarificationReason,
+  completedEffects
+}
+</code></pre>
+<p>A revised confirmation may contain an optional line:</p>
+<pre><code class="language-text">Clarification ticket: &lt;ticketId&gt;
+</code></pre>
+<p>NanCy accepts it as a continuation only when the ticket exists, is unexpired, belongs to the same main session, and has not been consumed. The user then confirms the entire revised task in the normal <code>y</code>/<code>yes</code> exchange. The ticket line is a reference, not authority: the task description and user&#39;s reply still define the new authorization.</p>
+<p>A confirmation without a ticket is a new root task. It must not consume, inherit, or overwrite any active clarification ticket. This permits an operator to start unrelated work while another task is waiting. Multiple live tickets may coexist.</p>
+<p>The ticket is consumed only after a valid affirmative reply and successful durable creation of the new task record. A denied, malformed, mismatched, or failed confirmation does not silently consume it. Expired tickets are rejected and pruned.</p>
+<h3 id="retry-depth">Retry depth</h3>
+<p>The root task begins at depth <code>0</code>. Each accepted clarification continuation increments depth. When a task already has <code>clarifyDepth &gt;= maxRetryDepth</code>, another <code>CLARIFY</code> is handled as an ordinary fail-closed denial: no new ticket is issued and the worker is stopped. A new unrelated task may still be confirmed normally.</p>
+<p>The agent never supplies <code>rootTaskId</code> or <code>clarifyDepth</code>; NanCy derives both from the validated ticket.</p>
+<h3 id="completed-side-effects">Completed side effects</h3>
+<p>A fresh worker can otherwise repeat work completed before clarification, such as sending a message, placing an order, or creating an appointment. Clarification mode must not ship for externally visible actions until NanCy can give the continuation a trusted record of completed effects.</p>
+<p>At minimum, every successfully completed consequential action needs a stable operation fingerprint and outcome recorded after <code>after_tool_call</code> or confirmed message delivery. A continuation receives this ledger as read-only authorization context and is told which effects must not be repeated. Where the destination supports an idempotency key, the root task ID should derive that key. If completion is uncertain, the continuation must verify state with a passive read or ask the operator rather than repeat the action.</p>
+<p>This ledger is a release condition for general clarification mode, not an optional later improvement.</p>
+<h2 id="configuration-proposal">Configuration proposal</h2>
+<p>Deterministic limits stay outside the reviewer connection settings:</p>
+<pre><code class="language-json">{
+  &quot;limits&quot;: {
+    &quot;hardTerminateThreshold&quot;: 20,
+    &quot;clarifyMode&quot;: {
+      &quot;allowed&quot;: false,
+      &quot;maxRetryDepth&quot;: 2,
+      &quot;ticketTtlMinutes&quot;: 60
+    }
+  },
+  &quot;macroReview&quot;: {
+    &quot;blockBurstThreshold&quot;: 3
+  }
+}
+</code></pre>
+<p>Clarification mode defaults off until its full release conditions are implemented. Numeric values must be finite positive integers in runtime normalization as well as in <code>openclaw.plugin.json</code>; callers cannot be trusted to have passed schema validation.</p>
+<h2 id="required-audit-events">Required audit events</h2>
+<ul>
+<li><code>denial_recorded</code>: reason code, security classification, total count, burst count;</li>
+<li><code>hard_terminated</code>: session, triggering reason code, total count;</li>
+<li><code>macro_review_started</code>, <code>macro_review_coalesced</code>, <code>macro_review_completed</code>;</li>
+<li><code>clarification_requested</code>: ticket ID, root/prior task IDs, depth, bounded reason;</li>
+<li><code>clarification_ticket_rejected</code>, <code>clarification_ticket_expired</code>, <code>clarification_ticket_consumed</code>;</li>
+<li><code>task_needs_clarification</code>; and</li>
+<li><code>session_blocked_after_stop</code>: stop kind, without increasing counters.</li>
+</ul>
+<p>Raw hostile payloads must not be copied into denial events, tickets, alerts, or macro-review history. Existing bounded metadata extraction remains the source for behavioral review.</p>
+<h2 id="minimum-test-matrix">Minimum test matrix</h2>
+<p>Part A:</p>
+<ul>
+<li>the twentieth counted denial terminates only that session;</li>
+<li>tool calls and outbound messages are both blocked after termination;</li>
+<li><code>testMode</code>, infrastructure failures, quota exhaustion, and post-termination attempts do not increment counters;</li>
+<li>counters cannot cross between two simultaneous workers;</li>
+<li>runtime or durable restart semantics match the documented choice.</li>
+</ul>
+<p>Part B:</p>
+<ul>
+<li>three counted denials request an early macro-review;</li>
+<li>a concurrent request is coalesced and causes exactly one later review;</li>
+<li>burst review resets burst/cadence counters but not the total counter;</li>
+<li>a reviewer that always says <code>ok</code> cannot prevent the hard ceiling.</li>
+</ul>
+<p>Part C:</p>
+<ul>
+<li>clarification mode is off by default and requires explicit confirmed opt-in;</li>
+<li>eligible <code>CLARIFY</code> blocks the current action, suspends only its worker, revokes authorization, and prevents later tools and messages;</li>
+<li><code>BLOCK</code> never creates a ticket;</li>
+<li>two simultaneous clarification tickets remain independent;</li>
+<li>an unrelated confirmation without a ticket remains a new root task;</li>
+<li>a wrong, expired, reused, or cross-session ticket is rejected;</li>
+<li>retry depth is derived only from NanCy state and capped deterministically;</li>
+<li>a continuation cannot repeat a recorded completed effect; and</li>
+<li>failure to persist a ticket/task/effect record fails closed before a worker is spawned.</li>
+</ul>
+<h2 id="rollout-order">Rollout order</h2>
+<ol>
+<li>Normalize denial events and add the stop check to both outbound paths.</li>
+<li>Add the deterministic runtime ceiling, tests, and accurate documentation.</li>
+<li>Add macro-review serialization/coalescing and burst triggering.</li>
+<li>Add durable trusted state if the limit is to survive gateway restarts.</li>
+<li>Add ticketed continuation parsing and state transitions behind a default-off flag.</li>
+<li>Add the completed-effects ledger and idempotency behavior.</li>
+<li>Enable clarification mode only after adversarial, concurrency, restart, and duplicate-effect tests pass.</li>
+</ol>
+
+<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit 4a3103f. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
+</main>
+</div>
+</body>
+</html>

@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SECURITY PHILOSOPHY — NanCy SSIL</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1a1a1a; --muted: #5b6472; --border: #e2e5ea;
+  --accent: #7c3aed; --code-bg: #f4f4f7; --nav-bg: #fafafa;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14161c; --fg: #eef0f4; --muted: #9aa3b2; --border: #2a2e38;
+    --accent: #b794f6; --code-bg: #1c1f27; --nav-bg: #191b22;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); }
+.layout { display: flex; min-height: 100vh; }
+nav.sidebar { width: 260px; flex-shrink: 0; background: var(--nav-bg); border-right: 1px solid var(--border); padding: 24px 16px; }
+nav.sidebar h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 20px 0 6px; }
+nav.sidebar ul { list-style: none; margin: 0; padding: 0; }
+nav.sidebar li a { display: block; padding: 4px 8px; border-radius: 6px; text-decoration: none; color: var(--fg); font-size: 14px; }
+nav.sidebar li a[aria-current="page"] { background: var(--accent); color: #fff; }
+nav.sidebar li a:hover { background: var(--border); }
+.brand { font-weight: 700; font-size: 18px; margin-bottom: 4px; }
+.brand-sub { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+main { flex: 1; min-width: 0; padding: 40px clamp(16px, 5vw, 64px); max-width: 860px; }
+main h1:first-child { margin-top: 0; }
+pre { background: var(--code-bg); padding: 14px 16px; overflow-x: auto; border-radius: 8px; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; overflow-x: auto; display: block; }
+th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+blockquote { border-left: 3px solid var(--accent); margin: 0; padding: 0 16px; color: var(--muted); }
+img { max-width: 100%; }
+footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+#nav-toggle { display: none; }
+.nav-toggle-label { display: none; }
+@media (max-width: 800px) {
+  .layout { display: block; }
+  nav.sidebar { width: auto; border-right: none; border-bottom: 1px solid var(--border); }
+  #nav-toggle:not(:checked) ~ .layout nav.sidebar .nav-body { display: none; }
+  .nav-toggle-label { display: block; padding: 16px; cursor: pointer; font-weight: 600; }
+}
+</style>
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="layout">
+<nav class="sidebar">
+<label class="nav-toggle-label" for="nav-toggle">☰ Docs menu</label>
+<div class="nav-body">
+<div class="brand">NanCy SSIL</div>
+<div class="brand-sub"><a href="https://github.com/fxg55647/NanCy">GitHub ↗</a></div>
+<div class="nav-group"><h2>Overview</h2><ul><li><a href="index.html">NanCy SSIL</a></li><li><a href="claude.html">CLAUDE</a></li><li><a href="how-agents-go-wrong.html">HOW AGENTS GO WRONG</a></li><li><a href="incidents.html">INCIDENTS</a></li><li><a href="misconceptions.html">MISCONCEPTIONS</a></li><li><a href="nancy-policy.html">NANCY POLICY</a></li><li><a href="related-work.html">RELATED WORK</a></li><li><a href="security-philosophy.html" aria-current="page">SECURITY PHILOSOPHY</a></li><li><a href="testing.html">TESTING</a></li></ul></div><div class="nav-group"><h2>Architecture</h2><ul><li><a href="architecture/debate-review.html">Debate Review</a></li><li><a href="architecture/denial-escalation-and-clarification.html">Denial Escalation And Clarification</a></li><li><a href="architecture/gap-detection.html">Gap Detection</a></li><li><a href="architecture/policy-precedence.html">Policy Precedence</a></li></ul></div><div class="nav-group"><h2>Audits</h2><ul><li><a href="audits/2026-09-14-security-review.html">2026 09 14 Security Review</a></li></ul></div>
+</div>
+</nav>
+<main>
+<h1 id="security-philosophy-limit-the-blast-radius">Security Philosophy: Limit the Blast Radius</h1>
+<blockquote>
+<p>Useful autonomy does not require perfect safety. It requires the worst credible failure to be sufficiently bounded.</p>
+</blockquote>
+<p>NanCy is not intended to turn security-critical or safety-critical deployments into safe ones.</p>
+<p>Instead, NanCy is designed for situations where autonomy creates meaningful economic value and the worst credible failure can be made bounded, recoverable, ethically acceptable, and unlikely to cause serious human suffering.</p>
+<p>The goal is not to guarantee that an agent will never make a mistake. No probabilistic safeguard can provide that guarantee. The goal is to constrain what a mistake can become.</p>
+<p>This means treating the agent&#39;s available permissions, money, data, credentials, communication channels, and ability to modify external systems as part of the security design.</p>
+<h2 id="bounded-delegation-in-practice">Bounded delegation in practice</h2>
+<p>Consider a task such as: &quot;Find three Finnish printing companies, ask them for quotes for 500 brochures, and send the quotes to me.&quot;</p>
+<p>The user cannot know every website, form field, recipient, or tool call in advance. Requiring approval for each step would remove much of the value of autonomy, while a static allowlist broad enough to cover every possible route would say little about whether a particular action belongs to the task.</p>
+<p>NanCy&#39;s intended operating model is to let the user confirm the task once, then let a disposable worker choose the execution path while NanCy checks its actions against that confirmed task. The same boundary covers tool calls and outbound messages. It should allow legitimate steps such as visiting candidate printers and sending quote requests, while rejecting attempts to add an unrelated recipient, attach an unnecessary customer database, make an unrequested payment, or follow a web page&#39;s instruction into an unrelated task.</p>
+<p>This is bounded delegation: the worker may decide how to carry out the task, but the confirmation does not grant it general authority beyond that task. The semantic reviewer is probabilistic, so deterministic permissions, limited credentials, financial caps, and other blast-radius controls remain necessary.</p>
+<p>The confirmed task defines the authorized goal. NanCy&#39;s standing <a href="nancy-policy.html"><code>NANCY-POLICY.md</code></a> defines means that remain forbidden or require clarification across every task. Keeping these separate prevents a useful goal from being interpreted as permission to exploit a vulnerability, bypass access controls, harm a third party, disclose unnecessary data, or evade supervision in order to succeed.</p>
+<h2 id="limit-the-blast-radius">Limit the blast radius</h2>
+<p>Before giving an agent a capability, ask:</p>
+<p><strong>What happens if the agent completely misuses this capability once?</strong></p>
+<p>If the answer is unacceptable, reduce the capability or do not give it to the agent.</p>
+<p>Practical examples include:</p>
+<ul>
+<li>Give the agent a dedicated payment card with a deliberately low limit instead of access to a primary company card or bank account.</li>
+<li>Give it permission to modify only the specific products or fields it needs in an online store, rather than full administrator access.</li>
+<li>Prefer task-scoped access to customer messages instead of unrestricted access to the historical inbox.</li>
+<li>Do not allow the agent to accumulate a permanent archive of customer email addresses, postal addresses, or other personal data merely because it encounters them while completing tasks.</li>
+<li>Limit how many emails, messages, purchases, refunds, or other external actions can be performed within a given period.</li>
+<li>Keep read and write permissions separate wherever possible.</li>
+<li>Use dedicated, revocable accounts, API keys, and credentials.</li>
+<li>Require human approval when an action exceeds a predefined financial, reputational, privacy, or operational threshold.</li>
+</ul>
+<p>A mistake involving a €100 limited payment card is a fundamentally different risk from a mistake involving access to the company&#39;s bank account.</p>
+<p>Likewise, mistakenly sending one task-related email is different from sending a message to an entire customer database. The purpose of containment is to prevent the second class of failure from being available to the agent at all.</p>
+<h2 id="where-nancy-should-not-be-relied-upon">Where NanCy should not be relied upon</h2>
+<p>NanCy should not be treated as the security boundary for environments where failure could:</p>
+<ul>
+<li>harm patients or other people;</li>
+<li>compromise critical infrastructure;</li>
+<li>expose highly sensitive or large-scale personal data;</li>
+<li>cause severe or difficult-to-reverse reputational damage;</li>
+<li>create unbounded financial or legal liability; or</li>
+<li>otherwise cause serious human suffering.</li>
+</ul>
+<p>In many such environments, the appropriate decision may be not to deploy a general-purpose autonomous agent at all.</p>
+<p>NanCy does not make catastrophic consequences acceptable. It helps you design systems where catastrophic consequences are not available to the agent in the first place.</p>
+<h2 id="further-reading">Further reading</h2>
+<p>This philosophy builds on established security ideas such as least privilege, containment, defense in depth, deterministic controls, and limiting blast radius.</p>
+<ul>
+<li><p><strong><a href="https://docs.openclaw.ai/sandboxing">OpenClaw — Sandboxing</a></strong>
+OpenClaw describes sandboxing as a way to reduce the blast radius of agent tool execution.</p>
+</li>
+<li><p><strong><a href="https://www.anthropic.com/engineering/how-we-contain-claude">Anthropic — How we contain Claude across products</a></strong>
+Anthropic argues that agent risk depends both on the probability of failure and on how much damage a failure can cause, and describes containment as a way to place hard limits on an agent&#39;s blast radius.</p>
+</li>
+<li><p><strong><a href="https://learn.microsoft.com/en-us/security/zero-trust/sfi/manage-agentic-risk">Microsoft — Reduce autonomous agentic AI risk</a></strong>
+Microsoft recommends deterministic controls, least privilege, task-scoped access, limited long-term memory, and designing systems under the assumption that individual components may fail.</p>
+</li>
+</ul>
+
+<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit 4a3103f. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
+</main>
+</div>
+</body>
+</html>

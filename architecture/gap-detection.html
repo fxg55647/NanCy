@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gap Detection — NanCy SSIL</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1a1a1a; --muted: #5b6472; --border: #e2e5ea;
+  --accent: #7c3aed; --code-bg: #f4f4f7; --nav-bg: #fafafa;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14161c; --fg: #eef0f4; --muted: #9aa3b2; --border: #2a2e38;
+    --accent: #b794f6; --code-bg: #1c1f27; --nav-bg: #191b22;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); }
+.layout { display: flex; min-height: 100vh; }
+nav.sidebar { width: 260px; flex-shrink: 0; background: var(--nav-bg); border-right: 1px solid var(--border); padding: 24px 16px; }
+nav.sidebar h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 20px 0 6px; }
+nav.sidebar ul { list-style: none; margin: 0; padding: 0; }
+nav.sidebar li a { display: block; padding: 4px 8px; border-radius: 6px; text-decoration: none; color: var(--fg); font-size: 14px; }
+nav.sidebar li a[aria-current="page"] { background: var(--accent); color: #fff; }
+nav.sidebar li a:hover { background: var(--border); }
+.brand { font-weight: 700; font-size: 18px; margin-bottom: 4px; }
+.brand-sub { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+main { flex: 1; min-width: 0; padding: 40px clamp(16px, 5vw, 64px); max-width: 860px; }
+main h1:first-child { margin-top: 0; }
+pre { background: var(--code-bg); padding: 14px 16px; overflow-x: auto; border-radius: 8px; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; overflow-x: auto; display: block; }
+th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+blockquote { border-left: 3px solid var(--accent); margin: 0; padding: 0 16px; color: var(--muted); }
+img { max-width: 100%; }
+footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+#nav-toggle { display: none; }
+.nav-toggle-label { display: none; }
+@media (max-width: 800px) {
+  .layout { display: block; }
+  nav.sidebar { width: auto; border-right: none; border-bottom: 1px solid var(--border); }
+  #nav-toggle:not(:checked) ~ .layout nav.sidebar .nav-body { display: none; }
+  .nav-toggle-label { display: block; padding: 16px; cursor: pointer; font-weight: 600; }
+}
+</style>
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="layout">
+<nav class="sidebar">
+<label class="nav-toggle-label" for="nav-toggle">☰ Docs menu</label>
+<div class="nav-body">
+<div class="brand">NanCy SSIL</div>
+<div class="brand-sub"><a href="https://github.com/fxg55647/NanCy">GitHub ↗</a></div>
+<div class="nav-group"><h2>Overview</h2><ul><li><a href="../index.html">NanCy SSIL</a></li><li><a href="../claude.html">CLAUDE</a></li><li><a href="../how-agents-go-wrong.html">HOW AGENTS GO WRONG</a></li><li><a href="../incidents.html">INCIDENTS</a></li><li><a href="../misconceptions.html">MISCONCEPTIONS</a></li><li><a href="../nancy-policy.html">NANCY POLICY</a></li><li><a href="../related-work.html">RELATED WORK</a></li><li><a href="../security-philosophy.html">SECURITY PHILOSOPHY</a></li><li><a href="../testing.html">TESTING</a></li></ul></div><div class="nav-group"><h2>Architecture</h2><ul><li><a href="debate-review.html">Debate Review</a></li><li><a href="denial-escalation-and-clarification.html">Denial Escalation And Clarification</a></li><li><a href="gap-detection.html" aria-current="page">Gap Detection</a></li><li><a href="policy-precedence.html">Policy Precedence</a></li></ul></div><div class="nav-group"><h2>Audits</h2><ul><li><a href="../audits/2026-09-14-security-review.html">2026 09 14 Security Review</a></li></ul></div>
+</div>
+</nav>
+<main>
+<h1 id="gap-detection">Gap Detection</h1>
+<p>Status: <strong>implemented, advisory only</strong>. This is the design record for the feature — read it before changing <code>src/confirmation/gap-detection.ts</code> or its wiring in <code>index.ts</code>&#39;s <code>message_sending</code> handler, so later changes stay consistent with the invariants below instead of drifting from them silently.</p>
+<h2 id="why-this-exists">Why this exists</h2>
+<p>NanCy&#39;s confirmation protocol (<code>src/confirmation/protocol.ts</code>, feature #2) decided <em>who</em> confirmed a task — it verified the reply was an exact <code>y</code>/<code>yes</code> from the right session, within the TTL, to the right message. It never looked at <em>what</em> was being confirmed. A proposal like &quot;Buy a laptop for the office and have it delivered&quot; is a completely valid, well-formed confirmation request — non-empty, correctly templated — and would be forwarded to the human and granted exactly as written, even though it leaves out a price ceiling, a specific model, a delivery deadline, and who receives it. Whatever the worker decides on those points becomes the <em>de facto</em> task scope, without the human ever having been asked.</p>
+<p>Gap detection closes that: before a well-formed, non-empty confirmation is sent, NanCy runs one advisory LLM check against the proposed description, looking for concrete decision points that plausibly matter for <em>this specific task</em> but were left unspecified. If it finds any, it appends a clearly separate note after the agent&#39;s own message, so the human sees them before replying <code>y</code> — not after the worker has already decided on its own.</p>
+<h2 id="non-goal-gap-detection-is-not-the-security-gate">Non-goal: gap detection is not the security gate</h2>
+<p>The confirmation description and destination now pass a separate required security review first. That review blocks on BLOCK, CLARIFY, missing analysis, provider error, or malformed output. Gap detection runs only after that gate has accepted the request, and remains advisory:</p>
+<ul>
+<li>it never blocks or delays sending the confirmation;</li>
+<li>it never rewrites or removes any part of the agent&#39;s own message — it only appends after it;</li>
+<li>any failure in this second advisory call is treated as &quot;no gaps found,&quot; not as a reason to hold back a confirmation the security review already accepted; and</li>
+<li>a detected gap does not count toward the denial-escalation ceiling (<code>src/policy/denial-policy.ts</code>) — it isn&#39;t hostile behavior, it&#39;s the agent doing exactly what it was asked (send a confirmation), just with an under-specified proposal.</li>
+</ul>
+<p>The rationale: missing task details and unsafe outbound content are different decisions. The security check must fail closed because the wrapper otherwise becomes an exfiltration channel. The optional completeness hint may fail open because its worst outcome is that the human does not get an extra hint.</p>
+<h2 id="how-it-works">How it works</h2>
+<ol>
+<li><code>message_sending</code> fires with the agent&#39;s outbound content. <code>parseConfirmationRequest</code> identifies it as a confirmation request (feature #2&#39;s existing parser) and the description passes the non-empty check.</li>
+<li>The required confirmation security review checks the description and destination. It must return a strict ALLOW; otherwise sending stops and no pending confirmation is recorded.</li>
+<li>If <code>(nancyConfig.gapDetection ?? true)</code> is on, <code>buildGapDetectionPrompt(description, policyContext)</code> builds a second one-shot prompt (see <code>src/confirmation/gap-detection.ts</code>) asking the model to name up to 5 concrete, task-relevant decision points left unspecified — explicitly told not to invent generic boilerplate concerns irrelevant to this task, and not to flag anything already specified.</li>
+<li>The model must reply with JSON only: <code>{&quot;gaps&quot;: [&quot;...&quot;, ...]}</code>, empty array if none. <code>parseGapDetectionResponse</code> extracts it defensively — non-JSON, the wrong shape, non-string entries, or more than 5 entries all degrade to a safe, truncated, or empty result rather than throwing.</li>
+<li>If any gaps were found, <code>appendGapNote</code> appends a note <strong>after</strong> the agent&#39;s original content: <code>&quot;\n\n🔍 NanCy note: this proposal doesn&#39;t specify — &lt;gap1&gt;; &lt;gap2&gt;. Reply y to proceed anyway, or ask for a more specific confirmation first.&quot;</code> The agent&#39;s own fixed-template text is never altered — <code>parseConfirmationRequest</code> already ran against the <em>original</em> content, so the id/description NanCy tracks are unaffected by whatever gets appended for display.</li>
+<li>The (possibly noted) content becomes what&#39;s actually sent: <code>message_sending</code> returns <code>{ content: outgoingContent }</code> when it differs from the input, or <code>undefined</code> (send unchanged) otherwise. <strong>The pending-confirmation record&#39;s <code>rawContent</code> is set from <code>outgoingContent</code>, not the agent&#39;s original content</strong> — this is the one detail most likely to regress: <code>message_sent</code>/<code>message_received</code> correlate a reply against <code>rawContent</code>, so if a future change appends the note <em>after</em> recording <code>rawContent</code> from the original text, delivery-failure detection and reply-threading (see <code>TESTING.md</code>/<code>test/confirmation-send-failure.test.ts</code>) silently break for every gap-noted confirmation.</li>
+<li>The confirmation still expires after the same TTL, still requires the same exact <code>y</code>/<code>yes</code>, still writes the same audit record — gap detection changes what the human <em>sees</em>, never the authorization mechanics feature #2 already had.</li>
+</ol>
+<h2 id="configuration">Configuration</h2>
+<pre><code class="language-json">&quot;gapDetection&quot;: true
+</code></pre>
+<p>Default <code>true</code>. Set to <code>false</code> to disable the advisory check and note. The required confirmation security review still runs. There is no separate rate limit or cost cap for the advisory call; confirmations are assumed to be rare.</p>
+<h2 id="known-limitations">Known limitations</h2>
+<ul>
+<li><strong>It&#39;s a judgment call, not a checklist.</strong> There&#39;s no way to mechanically verify &quot;did it catch everything relevant&quot; — a thorough model can always find <em>some</em> additional detail on almost any real task (confirmed empirically: seen catching that &quot;15-inch ThinkPad X1 Carbon&quot; is internally inconsistent, since that model is normally 14-inch). <code>scripts/run-eval.mts</code>&#39;s gap-detection section reports findings descriptively for this reason, not as a pass/fail gate — see its comments for why a naive &quot;vague task should get more gaps than the specific one&quot; count comparison was tried and abandoned as unreliable.</li>
+<li><strong>It only ever runs once, on the original proposal.</strong> If the agent resends a revised confirmation (a new id, per feature #2&#39;s own rule that every attempt needs a fresh confirmation), gap detection runs fresh on that revision too — but nothing tracks whether previously-flagged gaps were actually addressed. A human has to notice that for themselves.</li>
+<li><strong>The reviewer sees only the description, not the agent&#39;s full context.</strong> It can&#39;t know about constraints the agent is aware of but didn&#39;t write down (e.g. an existing standing budget), so it may flag something the human already considers settled elsewhere. This is intentional scope, not an oversight — teaching it to reason about implicit context would reopen exactly the kind of trust-the-agent&#39;s-framing problem Intent Anchoring exists to avoid.</li>
+<li><strong>No dedicated prompt-injection defense</strong>, same caveat as every other reviewer prompt in this codebase (see README feature #4). The description is quoted as untrusted data in the prompt, per the project&#39;s existing pattern, but that&#39;s a mitigation, not a guarantee.</li>
+</ul>
+<h2 id="test-coverage">Test coverage</h2>
+<ul>
+<li><code>test/gap-detection.test.ts</code> — pure <code>parseGapDetectionResponse</code>/<code>appendGapNote</code> unit tests (malformed JSON, wrong shape, truncation, no-gaps passthrough), and full <code>message_sending</code> integration tests: a vague description gets a note and the noted message still correlates through <code>message_sent</code>/<code>message_received</code>; a well-specified one is sent unmodified; <code>gapDetection: false</code> skips the advisory call; a failed advisory check leaves an already security-reviewed confirmation unmodified and grantable.</li>
+<li><code>test/confirmation-lifecycle.test.ts</code> — missing analysis fails closed before a confirmation can be sent or granted.</li>
+<li><code>scripts/run-eval.mts</code>&#39;s &quot;Gap detection&quot; section — the same vague-vs-specific comparison against the real configured model, reported descriptively (see Known limitations above).</li>
+</ul>
+
+<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit 4a3103f. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
+</main>
+</div>
+</body>
+</html>
