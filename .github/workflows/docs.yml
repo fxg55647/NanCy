@@ -31,7 +31,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          # openclaw's own preinstall check (a devDependency here, unrelated
+          # to the docs build) hard-requires >=24.16.0 <25 || >=26.1.0 and
+          # fails npm ci outright on anything older.
+          node-version: "24"
 
       - run: npm ci
 
