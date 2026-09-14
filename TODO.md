@@ -1,8 +1,8 @@
 # TODO
 
-## Debate-style triple-pass review — design proposal, not implemented
+## Debate-style triple-pass review — experimental implementation
 
-See `docs/architecture/debate-review.md`: an optional FOR/AGAINST/JUDGE analysis mode (adapted from `fxg55647/leima`'s `neutral_witness.py`) for the per-call reviewer. Not started — activation strategy (always-on vs. CLARIFY-escalation-only) and cost/latency tradeoffs need a decision before any code.
+See `docs/architecture/debate-review.md`: optional FOR/AGAINST/JUDGE full review via `analysis.debateMode` (`off`, `always`, `clarify`, `hybrid`). Default off. Mocked integration tests cover enforcement; comparative real-model safety, cost and latency evaluation remains outstanding, along with provider usage accounting.
 
 ## Moduloi src/index.ts — ✅ tehty
 

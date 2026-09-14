@@ -30,6 +30,12 @@
           "baseUrl": {
             "type": "string",
             "description": "Base URL for openai-compat providers (e.g. https://api.groq.com/openai)"
+          },
+          "debateMode": {
+            "type": "string",
+            "enum": ["off", "always", "clarify", "hybrid"],
+            "default": "off",
+            "description": "Experimental full-review debate. hybrid directly debates messages and all tools except web_search/web_fetch, which escalate only on CLARIFY. Enabled modes fail closed on full-review errors, including messages."
           }
         },
         "required": ["provider", "model", "apiKey"]

@@ -3,6 +3,7 @@ export interface AnalysisConfig {
   model: string;
   apiKey: string;
   baseUrl?: string;
+  debateMode?: "off" | "always" | "clarify" | "hybrid";
 }
 
 export interface MacroReviewConfig {

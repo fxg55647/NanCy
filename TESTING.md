@@ -31,6 +31,8 @@ never a restart you trigger yourself for exploratory testing.
 
 ## Option A — `npm test` (fast, deterministic, no network)
 
+Experimental debate comparison: `node --experimental-strip-types scripts/eval-debate.mts --list` previews synthetic cases without network access. To run them against a real model, set `NANCY_EVAL_CONFIG` to a JSON file containing an `AnalysisConfig` (provider/model/apiKey/baseUrl) and run the same command without `--list`. `NANCY_EVAL_RUNS` defaults to 3. This uses only the reviewer API, never a gateway, and writes `DEBATE-EVAL-RESULTS.json` with per-case verdicts, false-ALLOW/false-block flags, call counts and elapsed time for all four modes. It does not measure provider tokens/cost or prove deployment safety. The existing full-hook eval remains necessary for integration coverage.
+
 ```
 npm run check   # typecheck + test
 npm test        # just the test suite (node --test test/*.test.ts)
