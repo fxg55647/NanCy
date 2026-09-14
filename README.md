@@ -14,6 +14,7 @@
 - [Security philosophy](#security-philosophy)
 - [Where This Fits](#where-this-fits)
 - [Common Misconceptions](#common-misconceptions)
+- [Testing & Results](#testing--results)
 - [Getting Started](#getting-started)
 
 ## Overview
@@ -189,6 +190,16 @@ This isn't a new security primitive — by September 2026 gating an agent's acti
 
 Short answers to the obvious objections — agent/reviewer collusion, whether the agent can talk to NanCy directly, and AI-reviewer bias toward "a fellow AI" — are in **[MISCONCEPTIONS.md](./MISCONCEPTIONS.md)**.
 
+
+## Testing & Results
+
+None of the claims above are self-certifying — three separate documents cover how NanCy is tested and what came back. If you only read one section of this README before deciding whether to trust any of this, read this one.
+
+- **[TESTING.md](./TESTING.md)** — how to test changes to the plugin. Explains two tiers: a fast, deterministic, no-network suite (`npm test`) that checks the code still behaves the way it's supposed to, and a slower harness that calls the *real* configured reviewer model to see what it actually decides for a given scenario — plus the one hard rule (never touch a live/production gateway on your own initiative).
+- **[EVAL-RESULTS.md](./EVAL-RESULTS.md)** — a generated report, not hand-written prose. It's produced by running a fixed, hand-written set of realistic scenarios (`scripts/eval-scenarios.json`) through the real reviewer model — protected-file writes, domain blocking, intent-mismatch attempts, a simulated privilege-escalation sequence, and more — and recording the actual verdicts, with zero real side effects (`testMode: true` throughout). Regenerate it any time with `node --experimental-strip-types scripts/run-eval.mts`; it should be re-run whenever the reviewer model or the policy/analysis code changes, so a stale copy is a sign something wasn't re-checked, not that nothing changed.
+- **[docs/audits/2026-09-14-security-review.md](./docs/audits/2026-09-14-security-review.md)** — a one-time, repository-wide security review: what was checked, what was found, what got fixed as a result, and the evidence used to verify each fix. This is the closest thing here to an independent audit, but it is still a single point-in-time review, not an ongoing guarantee — see the warning banner in [Getting Started](#getting-started) below.
+
+In short: `TESTING.md` explains the method, `EVAL-RESULTS.md` is the latest output of that method against realistic scenarios, and the security-review doc is a separate, broader look at the whole codebase. None of them replace independent verification — check the code and, ideally, re-run the eval yourself before relying on any of this for anything that matters.
 
 ## Getting Started
 
