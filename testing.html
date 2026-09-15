@@ -193,6 +193,7 @@ config says — do that <em>in addition to</em> the fetch intercept, not instead
 it (a future code path could read <code>channels.telegram</code> some other way).</p>
 <h3 id="practical-gotchas-from-actually-running-this-tier-once">Practical gotchas, from actually running this tier once</h3>
 <ul>
+<li><strong>A hard-coded low output-token cap can silently fail every real review on a &quot;thinking&quot; model.</strong> Found via a real end-to-end run (<code>tools/mobile-chat-poc/</code>&#39;s A2A test against a live gateway with NanCy loaded), not something the mocked suite could ever catch: <code>src/analysis/client.ts</code>&#39;s <code>callLlm()</code> used a flat <code>maxOutputTokens: 300</code> for Gemini. On a thinking-capable model (NanCy&#39;s own live configured reviewer, <code>gemini-3.8-flash</code>, included) internal reasoning tokens are drawn from that <em>same</em> budget before any visible reply — 300 left no room for the actual two-line verdict once thinking consumed it, so the call routinely hit <code>MAX_TOKENS</code>, <code>callLlm()</code> threw, and NanCy&#39;s fail-closed design turned that into a denied/failed review with no obvious &quot;budget&quot; symptom. Fixed by raising the shared budget (<code>ANALYSIS_MAX_OUTPUT_TOKENS</code>) and, for Gemini specifically, disabling thinking outright (<code>generationConfig.thinkingConfig.thinkingBudget: 0</code>) — this reviewer call is meant to be a fast one-shot judgment, not a reasoning task. This is exactly the class of bug Option B exists for: Option A&#39;s mocked <code>fetch</code> always returns exactly the canned response you told it to, so a real provider&#39;s actual token accounting can only ever be caught here.</li>
 <li><strong>Finding the live config path</strong>: don&#39;t guess
 <code>~/.openclaw/openclaw.json</code> or hand-build it from <code>$env:USERPROFILE</code> inside
 a <code>Bash</code>-tool call that shells out to <code>powershell -Command &quot;...$env:...</code>&quot;<code>— the outer POSIX shell can mangle the</code>$env:<code>reference before PowerShell ever sees it, silently producing a wrong path that then reads as &quot;file doesn&#39;t exist.&quot; Either run</code>openclaw config file` (prints the actual active
@@ -330,7 +331,7 @@ confirmation matching only keys on <code>sessionKey</code>, not channel. Turn
 way when done. Absent an explicit in-the-moment request, this still doesn&#39;t
 require killing/restarting the gateway on your own initiative.</p>
 
-<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit 0f4d482. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
+<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit 098039e. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
 </main>
 </div>
 </body>
