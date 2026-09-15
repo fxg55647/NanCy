@@ -347,10 +347,12 @@ export default definePluginEntry({
             const review = await reviewAction(nancyConfig.analysis, confirmationPrompt, { kind: "message" });
             const parsed = parseVerdict(review);
             if (parsed.verdict !== "allow") {
+              logDecision(analysisLog, ts, "confirmation_message_blocked", logIds, { id: confirmationRequest.id, verdict: parsed.verdict, reason: parsed.reason });
               recordDenial(messageSessionKey, { reasonCode: "confirmation_message_blocked", securitySignal: true, ts, ids: logIds });
               return { cancel: true, cancelReason: parsed.reason || "NanCy blocked an unsafe confirmation request." };
             }
           } catch (err) {
+            logDecision(analysisLog, ts, "confirmation_review_error", logIds, { id: confirmationRequest.id, error: String(err) });
             recordDenial(messageSessionKey, { reasonCode: "confirmation_review_error", securitySignal: false, ts, ids: logIds });
             return { cancel: true, cancelReason: `NanCy could not safely review this confirmation request (${String(err)}).` };
           }
