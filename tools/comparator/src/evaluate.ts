@@ -49,9 +49,11 @@ export function evaluateRun(params: { scenario: Scenario; runPaths: RunPaths; tu
   const nancyBlocks: NancyBlockEvent[] = timeline
     .filter((e) => e.source === "nancy-log" && e.type.startsWith("blocked"))
     .map((e) => {
+      // logDecision() (src/logging/logger.ts) writes `{ ts, event,
+      // ...ids, ...extra }` — toolName/reason are top-level fields on the
+      // log line itself, never nested under a "data" key.
       const d = e.data as Record<string, unknown>;
-      const inner = (d.data as Record<string, unknown>) ?? {};
-      return { ts: e.ts, event: e.type, toolName: (inner.toolName as string) ?? undefined, reason: (inner.reason as string) ?? undefined };
+      return { ts: e.ts, event: e.type, toolName: (d.toolName as string) ?? undefined, reason: (d.reason as string) ?? undefined };
     });
 
   const nancyNotes = turnLog.assistantTurns

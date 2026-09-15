@@ -10,10 +10,12 @@
 // model-config.json shape:
 //   { "taskModel": "provider/model", "env": {"OPENAI_API_KEY": "..."},
 //     "analysis": {"provider": "openai", "model": "...", "apiKey": "..."} }
-// `env` is injected verbatim into the child `openclaw` process (with
-// --auth-env-only, so no ambient stored credentials are used — see
-// docs/architecture/behavior-comparator.md). `analysis` is NanCy's own
-// reviewer model config, used only for the nancy branch.
+// `env` is injected into the child `openclaw` process on top of this
+// process's own environment with every known provider credential env var
+// stripped first (see driver.ts's STRIPPED_BASE_ENV), so no ambient stored
+// credentials are used unless this file explicitly supplies them.
+// `analysis` is NanCy's own reviewer model config, used only for the
+// nancy branch.
 //
 // This makes real, billed model API calls. Round/time limits come from the
 // scenario file's own `limits` — see scenarios/laptop-vague-request.json.
@@ -25,8 +27,10 @@ import { buildTimeline } from "./correlate.ts";
 import { evaluateRun } from "./evaluate.ts";
 import { writeReport } from "./report.ts";
 import type { ProfileComparison } from "./report.ts";
-import type { UserProfile } from "./types.ts";
+import type { Branch, UserProfile } from "./types.ts";
 import type { AnalysisModelConfig } from "./config-builder.ts";
+import type { RunEvaluation } from "./evaluate.ts";
+import type { TimelineEvent } from "./correlate.ts";
 
 type ModelConfig = { taskModel: string; env?: Record<string, string>; analysis: AnalysisModelConfig };
 
@@ -58,41 +62,42 @@ async function main() {
   const profiles: UserProfile[] = ["accepting", "clarifying"];
   const comparisons: ProfileComparison[] = [];
 
+  async function runBranch(branch: Branch, profile: UserProfile): Promise<{ evaluation: RunEvaluation; timeline: TimelineEvent[] }> {
+    const runId = `${scenario.id}-${branch}-${profile}`;
+    console.log(`\n=== ${scenario.id} / ${profile} / ${branch} ===`);
+    const result = await runComparisonRun({
+      scenario,
+      branch,
+      userProfile: profile,
+      runId,
+      runsRoot: outDir,
+      taskModel: modelConfig.taskModel,
+      analysis: branch === "nancy" ? modelConfig.analysis : undefined,
+      env: modelConfig.env ?? {},
+    });
+    console.log(`  stopReason=${result.turnLog.stopReason} turns=${result.turnLog.userTurns.length}`);
+    const timeline = buildTimeline(result.runPaths, result.turnLog);
+    const evaluation = evaluateRun({ scenario, runPaths: result.runPaths, turnLog: result.turnLog, timeline });
+    return { evaluation, timeline };
+  }
+
   for (const profile of profiles) {
-    const baselineRunId = `${scenario.id}-baseline-${profile}`;
-    const nancyRunId = `${scenario.id}-nancy-${profile}`;
+    // Branch order is randomized per profile rather than always
+    // baseline-then-nancy, so that when this is later run repeatedly
+    // (spec's multi-run mode — see docs/architecture/behavior-comparator.md's
+    // "Explicitly deferred"), ordering effects (e.g. provider warm-up,
+    // time-of-day) can't systematically favor one branch. The report
+    // itself is order-independent — only which branch produced which
+    // facts matters, never which ran first.
+    const branchOrder: Branch[] = Math.random() < 0.5 ? ["baseline", "nancy"] : ["nancy", "baseline"];
+    const results: Partial<Record<Branch, { evaluation: RunEvaluation; timeline: TimelineEvent[] }>> = {};
+    for (const branch of branchOrder) {
+      results[branch] = await runBranch(branch, profile);
+    }
+    const baseline = results.baseline!;
+    const nancy = results.nancy!;
 
-    console.log(`\n=== ${scenario.id} / ${profile} / baseline ===`);
-    const baselineResult = await runComparisonRun({
-      scenario,
-      branch: "baseline",
-      userProfile: profile,
-      runId: baselineRunId,
-      runsRoot: outDir,
-      taskModel: modelConfig.taskModel,
-      env: modelConfig.env ?? {},
-    });
-    console.log(`  stopReason=${baselineResult.turnLog.stopReason} turns=${baselineResult.turnLog.userTurns.length}`);
-
-    console.log(`=== ${scenario.id} / ${profile} / nancy ===`);
-    const nancyResult = await runComparisonRun({
-      scenario,
-      branch: "nancy",
-      userProfile: profile,
-      runId: nancyRunId,
-      runsRoot: outDir,
-      taskModel: modelConfig.taskModel,
-      analysis: modelConfig.analysis,
-      env: modelConfig.env ?? {},
-    });
-    console.log(`  stopReason=${nancyResult.turnLog.stopReason} turns=${nancyResult.turnLog.userTurns.length}`);
-
-    const baselineTimeline = buildTimeline(baselineResult.runPaths, baselineResult.turnLog);
-    const nancyTimeline = buildTimeline(nancyResult.runPaths, nancyResult.turnLog);
-    const baselineEval = evaluateRun({ scenario, runPaths: baselineResult.runPaths, turnLog: baselineResult.turnLog, timeline: baselineTimeline });
-    const nancyEval = evaluateRun({ scenario, runPaths: nancyResult.runPaths, turnLog: nancyResult.turnLog, timeline: nancyTimeline });
-
-    comparisons.push({ scenario, userProfile: profile, baseline: baselineEval, nancy: nancyEval, baselineTimeline, nancyTimeline });
+    comparisons.push({ scenario, userProfile: profile, baseline: baseline.evaluation, nancy: nancy.evaluation, baselineTimeline: baseline.timeline, nancyTimeline: nancy.timeline });
   }
 
   writeReport({ outDir, comparisons });

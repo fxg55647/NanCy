@@ -67,7 +67,7 @@ function formatEventRef(e: TimelineEvent): string {
 }
 
 export function buildSummaryMd(comparisons: ProfileComparison[]): string {
-  let md = `# NanCy behavior comparator — summary\n\nGenerated ${new Date().toISOString()}. Facts below are computed directly from recorded events (see \`results.json\`) — not model-narrated.\n\n`;
+  let md = `# NanCy behavior comparator — summary\n\nGenerated ${new Date().toISOString()}. Facts below are computed directly from recorded events (see \`results.json\`) — not model-narrated. "NanCyn kanssa" tarkoittaa koko NanCy-kokonaisuutta (plugin + agentin AGENTS.md-vahvistusohje yhdessä), ei pelkkää pluginin vaikutusta erillään — niiden erottaminen vaatisi kolmannen haaran (ks. \`docs/architecture/behavior-comparator.md\`).\n\n`;
   for (const c of comparisons) {
     const profileLabel = c.userProfile === "accepting" ? "hyväksyvä käyttäjä" : "täsmentävä käyttäjä";
     md += `## ${c.scenario.label} — ${profileLabel}\n\n`;
@@ -142,7 +142,7 @@ export function buildReportHtml(comparisons: ProfileComparison[]): string {
   .uncertainty { font-size: 0.82em; color: var(--muted); margin-top: 10px; }
 </style>
 <h1>NanCy behavior comparator</h1>
-<p style="color: var(--muted)">Generated ${new Date().toISOString()}. Each line traces back to a real recorded event — see the JSON report for the full timeline.</p>
+<p style="color: var(--muted)">Generated ${new Date().toISOString()}. Each line traces back to a real recorded event — see the JSON report for the full timeline. &ldquo;NanCyn kanssa&rdquo; on koko NanCy-kokonaisuus (plugin + agentin AGENTS.md-vahvistusohje), ei pelkkä plugin erikseen.</p>
 ${cards}
 `;
 }

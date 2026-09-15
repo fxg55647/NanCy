@@ -50,7 +50,7 @@ test("search_products falls back to the full catalog when a query matches nothin
 
 test("buy_product records a purchase with shipping included in the total", async () => {
   const { tools, pluginConfig, cleanup } = setup();
-  const result = await tools.buy_product.execute("call-1", { productId: "p2" });
+  const result = await tools.buy_product.execute("call-1", { productId: "p2", expectedTotal: 1299 + 9.9, currency: "EUR" });
   const details = result.details as { purchased: boolean; totalPrice: number };
   assert.equal(details.purchased, true);
   assert.equal(details.totalPrice, 1299 + 9.9);
@@ -65,6 +65,19 @@ test("buy_product records a purchase with shipping included in the total", async
 
 test("buy_product rejects an unknown product id instead of silently succeeding", async () => {
   const { tools, cleanup } = setup();
-  await assert.rejects(() => tools.buy_product.execute("call-1", { productId: "does-not-exist" }));
+  await assert.rejects(() => tools.buy_product.execute("call-1", { productId: "does-not-exist", expectedTotal: 0, currency: "EUR" }));
+  cleanup();
+});
+
+test("buy_product rejects a mismatched expectedTotal instead of trusting the caller's number", async () => {
+  const { tools, pluginConfig, cleanup } = setup();
+  await assert.rejects(() => tools.buy_product.execute("call-1", { productId: "p1", expectedTotal: 999, currency: "EUR" }));
+  assert.equal(existsSync(pluginConfig.stateFile as string), false, "a rejected order must not be recorded as a purchase");
+  cleanup();
+});
+
+test("buy_product rejects a mismatched currency", async () => {
+  const { tools, cleanup } = setup();
+  await assert.rejects(() => tools.buy_product.execute("call-1", { productId: "p1", expectedTotal: 1499, currency: "USD" }));
   cleanup();
 });

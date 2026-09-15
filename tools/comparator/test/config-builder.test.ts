@@ -30,6 +30,7 @@ test("baseline branch never loads nancy and never writes AGENTS.md", () => {
     const config = JSON.parse(readFileSync(paths.configPath, "utf8"));
     assert.equal(config.plugins.entries.nancy, undefined);
     assert.equal(config.plugins.load.paths.length, 2, "baseline should only load scenario-shop + checkpoint-recorder");
+    assert.deepEqual(config.plugins.allow, ["scenario-shop", "checkpoint-recorder"]);
     assert.equal(existsSync(join(paths.workspaceDir, "AGENTS.md")), false);
   });
 });
@@ -47,11 +48,18 @@ test("nancy branch loads nancy's plugin dir, writes AGENTS.md, and sets telegram
     const config = JSON.parse(readFileSync(paths.configPath, "utf8"));
     assert.ok(config.plugins.entries.nancy);
     assert.equal(config.plugins.load.paths.length, 3, "nancy branch should load scenario-shop + checkpoint-recorder + nancy");
+    assert.deepEqual(config.plugins.allow, ["scenario-shop", "checkpoint-recorder", "nancy"]);
     assert.equal(config.plugins.entries.nancy.config.telegramAlerts, false);
     assert.equal(config.plugins.entries.nancy.config.analysis.apiKey, "test-key");
     const agentsMd = readFileSync(join(paths.workspaceDir, "AGENTS.md"), "utf8");
     assert.ok(agentsMd.includes("Formal confirmation:"));
     assert.ok(agentsMd.includes("Reply y to proceed, any other reply cancels."));
+    // The nancy plugin dir loaded is a fresh per-run copy nested under
+    // runDir, not the shared repo root — see copyNancyPluginForRun's
+    // comment in config-builder.ts for why.
+    const nancyPluginPath = config.plugins.load.paths[2] as string;
+    assert.ok(nancyPluginPath.startsWith(paths.runDir), `expected the nancy plugin path to be a per-run copy under ${paths.runDir}, got ${nancyPluginPath}`);
+    assert.ok(existsSync(join(nancyPluginPath, "src", "index.ts")));
   });
 });
 

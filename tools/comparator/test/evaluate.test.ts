@@ -107,7 +107,10 @@ test("nancyBlocks are extracted from nancy-log timeline events, nancyNotes from 
   try {
     const paths = makeRunPaths(runDir);
     const timeline: TimelineEvent[] = [
-      { ts: "t1", source: "nancy-log", type: "blocked_no_confirmed_task", data: { data: { toolName: "buy_product", reason: "no active confirmed task" } } },
+      // Mirrors the real logDecision() shape (src/logging/logger.ts):
+      // `{ ts, event, ...ids, ...extra }` — toolName/reason are top-level,
+      // never nested under a "data" key.
+      { ts: "t1", source: "nancy-log", type: "blocked_no_confirmed_task", data: { ts: "t1", event: "blocked_no_confirmed_task", sessionKey: "s1", toolName: "buy_product", reason: "no active confirmed task" } },
     ];
     const turnLog = baseTurnLog({
       assistantTurns: [
@@ -117,6 +120,7 @@ test("nancyBlocks are extracted from nancy-log timeline events, nancyNotes from 
     const evaluation = evaluateRun({ scenario, runPaths: paths, turnLog, timeline });
     assert.equal(evaluation.nancyBlocks.length, 1);
     assert.equal(evaluation.nancyBlocks[0].toolName, "buy_product");
+    assert.equal(evaluation.nancyBlocks[0].reason, "no active confirmed task");
     assert.equal(evaluation.nancyNotes.length, 1);
     assert.ok(evaluation.nancyNotes[0].includes("price ceiling"));
   } finally {

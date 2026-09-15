@@ -14,6 +14,7 @@ import { spawnSync } from "child_process";
 import { existsSync, writeFileSync } from "fs";
 import { join, resolve, dirname } from "path";
 import { fileURLToPath } from "url";
+import { listKnownProviderAuthEnvVarNames, omitEnvKeysCaseInsensitive } from "openclaw/plugin-sdk/provider-auth";
 import type { Branch, DriverTurnLog, RunPaths, Scenario, UserProfile } from "./types.ts";
 import { buildRun } from "./config-builder.ts";
 import type { AnalysisModelConfig } from "./config-builder.ts";
@@ -21,17 +22,35 @@ import { decideUserReply } from "./user-simulator.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..", "..", "..");
-const OPENCLAW_BIN = join(REPO_ROOT, "node_modules", ".bin", process.platform === "win32" ? "openclaw.cmd" : "openclaw");
+// `node_modules/.bin/openclaw.cmd` fails with EINVAL when spawned via
+// spawnSync on Windows (verified empirically) — Windows requires either
+// `shell: true` or invoking the real entry file directly. Run the actual
+// ESM entry (`openclaw.mjs`, from package.json's "bin") through the same
+// Node binary this process is already running under instead, which works
+// identically cross-platform and avoids the shell-wrapper problem entirely.
+const OPENCLAW_ENTRY = join(REPO_ROOT, "node_modules", "openclaw", "openclaw.mjs");
 
 const DEFAULT_TURN_TIMEOUT_MS = 120_000;
 
-// The exact `--json` envelope for `agent exec` is confirmed
-// (classifyAgentExecResult in agent-exec-*.mjs: {ok, status, final,
-// payloads: [{text,...}], ...}). Plain `agent --json` (used here, for
-// session continuity — see module comment) was NOT independently
-// confirmed to share that shape. This function is the single place to
-// fix if a real run's actual envelope differs — see verification notes in
-// the plan / docs/architecture/behavior-comparator.md.
+// Base env for every spawned `openclaw` child: strip every provider
+// credential env var OpenClaw itself knows about (OPENAI_API_KEY,
+// ANTHROPIC_API_KEY, etc. — the real list, not a guessed one) from this
+// process's own environment, so a comparator run can never silently fall
+// back to whatever credentials happen to be set in the operator's shell.
+// The run's own explicit `env` (from model-config.json) is layered back on
+// top of this in runOneCliTurn, per call.
+const STRIPPED_BASE_ENV = omitEnvKeysCaseInsensitive(process.env, listKnownProviderAuthEnvVarNames());
+
+// Plain `openclaw agent --json`'s error envelope is now empirically
+// confirmed (real CLI invocation, invalid model, see
+// tools/comparator/test/driver-smoke.test.ts): `{ok: false, error: {type,
+// message}}`. Its success envelope is NOT yet independently confirmed —
+// `agent exec`'s is known (classifyAgentExecResult in agent-exec-*.mjs:
+// {ok, status, final, payloads: [{text,...}], ...}) and this function
+// assumes plain `agent` shares that shape, but that assumption needs
+// checking on the first real (successful) calibration run. This function
+// is the single place to fix if it differs — see
+// docs/architecture/behavior-comparator.md's "Known limitations".
 export function extractAssistantText(json: unknown): string {
   const obj = (json ?? {}) as Record<string, unknown>;
   if (Array.isArray(obj.payloads)) {
@@ -46,18 +65,36 @@ export function extractAssistantText(json: unknown): string {
   return "";
 }
 
-function runOneCliTurn(params: { runPaths: RunPaths; sessionKey: string; message: string; taskModel: string; env: Record<string, string>; timeoutMs: number }): {
+// `{ok: false, error: {...}}` is a genuine CLI/model-level failure (e.g.
+// an invalid model id, a provider outage) — distinct from `ok: true` with
+// merely empty assistant text. Conflating the two would misreport a real
+// failure as "the user-simulator had nothing left to say".
+export function envelopeError(json: unknown): string | undefined {
+  const obj = (json ?? {}) as Record<string, unknown>;
+  if (obj.ok !== false) return undefined;
+  const err = obj.error as Record<string, unknown> | undefined;
+  return typeof err?.message === "string" ? err.message : "openclaw agent reported ok: false with no error message";
+}
+
+export function runOneCliTurn(params: { runPaths: RunPaths; sessionKey: string; message: string; taskModel: string; env: Record<string, string>; timeoutMs: number }): {
   ok: boolean;
   json?: unknown;
   rawStdout: string;
   rawStderr: string;
+  spawnError?: string;
 } {
   const { runPaths, sessionKey, message, taskModel, env, timeoutMs } = params;
+  // --auth-env-only is only a flag on `openclaw agent exec`, not plain
+  // `openclaw agent` (which this harness uses for session continuity — see
+  // module comment) — passing it here gets rejected as an unknown flag.
+  // Credential isolation instead comes from STRIPPED_BASE_ENV above: no
+  // ambient provider credential env vars reach the child at all, only
+  // whatever this run's own `env` explicitly supplies.
   const result = spawnSync(
-    OPENCLAW_BIN,
-    ["agent", "--local", "--agent", "test-agent", "--session-key", sessionKey, "--message", message, "--model", taskModel, "--auth-env-only", "--json"],
+    process.execPath,
+    [OPENCLAW_ENTRY, "agent", "--local", "--agent", "test-agent", "--session-key", sessionKey, "--message", message, "--model", taskModel, "--json"],
     {
-      env: { ...process.env, ...env, OPENCLAW_STATE_DIR: runPaths.stateDir, OPENCLAW_CONFIG_PATH: runPaths.configPath },
+      env: { ...STRIPPED_BASE_ENV, ...env, OPENCLAW_STATE_DIR: runPaths.stateDir, OPENCLAW_CONFIG_PATH: runPaths.configPath },
       encoding: "utf8",
       timeout: timeoutMs,
       maxBuffer: 64 * 1024 * 1024,
@@ -65,17 +102,16 @@ function runOneCliTurn(params: { runPaths: RunPaths; sessionKey: string; message
   );
   const rawStdout = result.stdout ?? "";
   const rawStderr = result.stderr ?? "";
-  if (result.error || (result.status !== null && result.status !== 0)) return { ok: false, rawStdout, rawStderr };
-  // --json output may share stdout with other log lines on some hosts —
-  // take the last line that looks like a JSON object.
-  const jsonLine = rawStdout
-    .trim()
-    .split("\n")
-    .reverse()
-    .find((l) => l.trim().startsWith("{"));
-  if (!jsonLine) return { ok: false, rawStdout, rawStderr };
+  // result.error is set only for a spawn-level failure (wrong executable,
+  // EINVAL, ENOENT, timeout-killed) — distinct from the child running and
+  // exiting non-zero, which --json output can still explain.
+  if (result.error) return { ok: false, rawStdout, rawStderr, spawnError: String(result.error) };
+  // In --json mode OpenClaw routes diagnostics to stderr and prints
+  // exactly one JSON value on stdout (verified empirically) — parse the
+  // whole trimmed stdout directly rather than scanning for a `{`-prefixed
+  // line, which breaks on pretty-printed (multi-line) JSON.
   try {
-    return { ok: true, json: JSON.parse(jsonLine), rawStdout, rawStderr };
+    return { ok: true, json: JSON.parse(rawStdout.trim()), rawStdout, rawStderr };
   } catch {
     return { ok: false, rawStdout, rawStderr };
   }
@@ -136,6 +172,13 @@ export async function runComparisonRun(params: {
         rawJson: { stdout: cliResult.rawStdout, stderr: cliResult.rawStderr },
         assistantText: "",
       });
+      stopReason = "cli_error";
+      break;
+    }
+
+    const cliError = envelopeError(cliResult.json);
+    if (cliError) {
+      turnLog.assistantTurns.push({ turnIndex, ts: new Date().toISOString(), rawJson: cliResult.json, assistantText: "" });
       stopReason = "cli_error";
       break;
     }
