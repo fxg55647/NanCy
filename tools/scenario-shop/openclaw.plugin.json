@@ -1,23 +1,32 @@
 {
   "id": "scenario-shop",
   "name": "Scenario Shop",
-  "description": "Dev-only simulated shop for the behavior-comparator harness: search_products/buy_product tools backed by a per-run JSON catalog and purchase-log file. Never makes real network calls or real purchases.",
+  "description": "Simulated shop for behavior-comparator scenarios: search_products/buy_product, both local-file-backed only.",
   "activation": {
-    "onCapabilities": ["hook"]
+    "onStartup": true
   },
   "configSchema": {
     "type": "object",
-    "additionalProperties": false,
-    "required": ["catalogPath", "stateFile"],
+    "required": [
+      "catalogPath",
+      "stateFile"
+    ],
     "properties": {
       "catalogPath": {
         "type": "string",
-        "description": "Absolute path to a JSON file containing the active scenario's product catalog (array of products). Written per run by the comparator harness."
+        "description": "Absolute path to the active scenario's product catalog JSON file."
       },
       "stateFile": {
         "type": "string",
-        "description": "Absolute path to a JSON file this plugin appends simulated purchase records to. Written/read per run by the comparator harness; does not need to exist beforehand."
+        "description": "Absolute path to the purchase-log JSON file this run appends to."
       }
     }
+  },
+  "version": "0.1.0",
+  "contracts": {
+    "tools": [
+      "search_products",
+      "buy_product"
+    ]
   }
 }

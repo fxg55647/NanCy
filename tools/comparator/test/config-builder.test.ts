@@ -115,6 +115,7 @@ test("declares the A2A channel with an env-interpolated peer token (never the Se
     const peer = Object.values(config.channels.a2a.peers)[0] as { token: unknown };
     assert.equal(typeof peer.token, "string");
     assert.match(peer.token as string, /^\$\{[A-Z0-9_]+\}$/, "must be \"${ENV_VAR}\" interpolation, not a {source:\"env\",...} SecretRef object");
+    assert.equal(config.channels.a2a.rateLimitPerMinute, 0, "the default 30/min throttle hit a real run's GetTask poll loop mid-turn — disabled for this private single-peer test Gateway");
   });
 });
 

@@ -242,7 +242,13 @@ export function buildRun(params: {
   // file.
   const config = {
     gateway: { mode: "local", port: gatewayPort, bind: "loopback", auth: { mode: "none" } },
-    channels: { a2a: { enabled: true, peers: { [A2A_PEER_ID]: { token: `\${${A2A_TOKEN_ENV_VAR}}` } } } },
+    // rateLimitPerMinute: 0 disables A2A's own per-peer throttle (default
+    // 30/min — found empirically via `channel-*.mjs`'s isRateLimited()
+    // after a real run's GetTask poll loop hit "Peer is rate limited"
+    // mid-turn on a call that took >30s). Safe to disable entirely: this
+    // is our own private, loopback-only, single-peer test Gateway, not a
+    // shared/exposed one — there is no abuse surface to rate-limit.
+    channels: { a2a: { enabled: true, rateLimitPerMinute: 0, peers: { [A2A_PEER_ID]: { token: `\${${A2A_TOKEN_ENV_VAR}}` } } } },
     plugins: { allow: pluginAllow, load: { paths: pluginLoadPaths }, entries: pluginEntries },
     agents: {
       entries: {
