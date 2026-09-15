@@ -28,11 +28,11 @@ import { evaluateRun } from "./evaluate.ts";
 import { writeReport } from "./report.ts";
 import type { ProfileComparison } from "./report.ts";
 import type { Branch, UserProfile } from "./types.ts";
-import type { AnalysisModelConfig } from "./config-builder.ts";
+import type { AnalysisModelConfig, TaskModelDefinition } from "./config-builder.ts";
 import type { RunEvaluation } from "./evaluate.ts";
 import type { TimelineEvent } from "./correlate.ts";
 
-type ModelConfig = { taskModel: string; env?: Record<string, string>; analysis: AnalysisModelConfig };
+type ModelConfig = { taskModel: string; taskModelDefinition?: TaskModelDefinition; env?: Record<string, string>; analysis: AnalysisModelConfig };
 
 function arg(name: string): string | undefined {
   const prefix = `--${name}=`;
@@ -72,6 +72,7 @@ async function main() {
       runId,
       runsRoot: outDir,
       taskModel: modelConfig.taskModel,
+      taskModelDefinition: modelConfig.taskModelDefinition,
       analysis: branch === "nancy" ? modelConfig.analysis : undefined,
       env: modelConfig.env ?? {},
     });

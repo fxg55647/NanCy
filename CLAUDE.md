@@ -44,6 +44,8 @@ Status: early-stage and "research and development only" per README's warning ban
 
 Work has been on the operational/runtime side: cron-triggered runs are gated like the main session, `testMode` dry-runs full tasks with zero real side effects, and Telegram alerting distinguishes operator pages from logged denials. `allowUnconfirmedInfoLookups` (default on) lets `web_search`/`web_fetch` reach the real reviewer with no confirmed task, judged against a fixed generic "harmless info lookup only" baseline; a deterministic fixed one-hour per-session window (`unconfirmedInfoLookupLimitPerHour`) caps those grants. The 2026-09-14 review also made required reviews fail closed, moved every shell command into semantic review, rejected duplicate task IDs, and invalidated in-flight authorization decisions when their session ends or changes generation.
 
+`src/analysis/client.ts`'s `callLlm()` used a flat 300-token output cap that a "thinking" reviewer model (NanCy's own live `gemini-3.8-flash`) could exhaust entirely on internal reasoning before any visible reply, routinely hitting `MAX_TOKENS` and failing every real review closed with no obvious symptom pointing at the cause. Found via `tools/mobile-chat-poc/`'s real A2A end-to-end test (the class of bug only a real-model run, not the mocked suite, can catch — see `TESTING.md`'s "Practical gotchas"). Fixed: the shared budget is raised and Gemini calls now explicitly disable thinking (`thinkingConfig.thinkingBudget: 0`) for this fast one-shot judgment.
+
 ## Logs & runtime artifacts (not source, don't treat as code)
 
 - `nancy.log` — general plugin log
@@ -54,7 +56,7 @@ Work has been on the operational/runtime side: cron-triggered runs are gated lik
 
 ## Dev-only instrumentation (`tools/`)
 
-Not part of the NanCy plugin itself — separate OpenClaw plugins/scripts used to observe and compare NanCy's effect on a real agent, never loaded by an operator's real gateway config. `tools/checkpoint-recorder/` captures the full model context + tool-call outcomes for any OpenClaw run. `tools/scenario-shop/` is a fully local simulated shop (`search_products`/`buy_product`) for scenario testing. `tools/comparator/` drives real `openclaw agent` runs through both a bare-OpenClaw and a NanCy-loaded isolated profile and reports the difference. See `docs/architecture/behavior-comparator.md`.
+Not part of the NanCy plugin itself — separate OpenClaw plugins/scripts used to observe and compare NanCy's effect on a real agent, never loaded by an operator's real gateway config. `tools/checkpoint-recorder/` captures the full model context + tool-call outcomes for any OpenClaw run. `tools/scenario-shop/` is a fully local simulated shop (`search_products`/`buy_product`) for scenario testing. `tools/comparator/` drives real `openclaw agent` runs through both a bare-OpenClaw and a NanCy-loaded isolated profile and reports the difference. See `docs/architecture/behavior-comparator.md`. `tools/mobile-chat-poc/` is different in kind from the other three: no plugin code at all, just a terminal client (`client.mjs`), a browser/phone chat page (`web/index.html`), and a config snippet for OpenClaw's bundled A2A channel — the mobile-app plan's (`docs/mobile-app-todo.md`) first transport POC, proving text chat + NanCy's confirmation dance work over A2A before any real native phone client exists.
 
 ## Docs map
 

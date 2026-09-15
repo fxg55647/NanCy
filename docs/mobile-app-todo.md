@@ -21,6 +21,7 @@ Nykyinen projekti on OpenClaw-agentin tehtävävaltuutusta ja toimintaa valvova 
 README kuvaa koodin omistaman tehtävävahvistuksen ja suojatut ohjaustiedostot. Mobiilin painikkeita, lomakkeita tai puhetta ei saa vain tulkita agentin itse tuottamaksi hyväksynnäksi. Nykyinen tarkennus- ja estokäyttäytyminen sekä vahvistuksen voimassaolo on tarkistettava toteutuksesta ennen mobiiliprotokollan suunnittelua.
 
 - [ ] Kartoita nykyinen tehtävä-, vahvistus-, worker- ja ilmoitusrajapinta.
+- [x] Ensimmäinen kuljetuskerros-POC: `tools/mobile-chat-poc/` valjastaa OpenClaw'n valmiin A2A-kanavan (ei uutta liitännäiskoodia) pelkkään tekstichattiin — ei vielä ajettu oikeaa Gatewayta vasten, ks. sen README:n "Next steps".
 - [ ] Määrittele palvelurajapinta mobiilille: tehtävät, aineistot, kysymykset, hyväksynnät ja tulokset.
 - [ ] Toteuta käyttäjän vastauksen vastaanotto ja valtuutuksen kirjaaminen luotetussa koodissa.
 - [ ] Suunnittele ohjemuutoksille erillinen hallintareitti, joka säilyttää nykyisten suojattujen tiedostojen suojauksen.

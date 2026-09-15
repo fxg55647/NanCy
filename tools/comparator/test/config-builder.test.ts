@@ -15,6 +15,17 @@ const scenario: Scenario = {
   limits: { maxTurns: 6, maxWallClockMs: 60_000 },
 };
 
+// "google" is the only provider config-builder.ts currently knows how to
+// declaratively register (see its PROVIDER_REGISTRATION) — an arbitrary
+// string like "openai/gpt-test" now correctly throws (see the dedicated
+// test below), so every other fixture here uses a supported provider.
+const TASK_MODEL = "google/gemini-test";
+const TASK_MODEL_ENV = { GEMINI_API_KEY: "test-key" };
+// buildRun requires a port to write into gateway.port config — these tests
+// only inspect the generated config, they never actually start a gateway,
+// so a fixed dummy value is fine.
+const TEST_GATEWAY_PORT = 19999;
+
 function withTempRoot(fn: (runsRoot: string) => void) {
   const runsRoot = mkdtempSync(join(tmpdir(), "comparator-test-"));
   try {
@@ -26,7 +37,7 @@ function withTempRoot(fn: (runsRoot: string) => void) {
 
 test("baseline branch never loads nancy and never writes AGENTS.md", () => {
   withTempRoot((runsRoot) => {
-    const paths = buildRun({ scenario, branch: "baseline", runId: "r1", runsRoot, taskModel: "openai/gpt-test" });
+    const paths = buildRun({ scenario, branch: "baseline", runId: "r1", runsRoot, taskModel: TASK_MODEL, taskModelEnv: TASK_MODEL_ENV, gatewayPort: TEST_GATEWAY_PORT });
     const config = JSON.parse(readFileSync(paths.configPath, "utf8"));
     assert.equal(config.plugins.entries.nancy, undefined);
     assert.equal(config.plugins.load.paths.length, 2, "baseline should only load scenario-shop + checkpoint-recorder");
@@ -42,8 +53,10 @@ test("nancy branch loads nancy's plugin dir, writes AGENTS.md, and sets telegram
       branch: "nancy",
       runId: "r2",
       runsRoot,
-      taskModel: "openai/gpt-test",
-      analysis: { provider: "openai", model: "gpt-test", apiKey: "test-key" },
+      taskModel: TASK_MODEL,
+      taskModelEnv: TASK_MODEL_ENV,
+      analysis: { provider: "gemini", model: "gemini-test", apiKey: "test-key" },
+      gatewayPort: TEST_GATEWAY_PORT,
     });
     const config = JSON.parse(readFileSync(paths.configPath, "utf8"));
     assert.ok(config.plugins.entries.nancy);
@@ -65,13 +78,13 @@ test("nancy branch loads nancy's plugin dir, writes AGENTS.md, and sets telegram
 
 test("nancy branch without an analysis config throws rather than silently loading NanCy unconfigured", () => {
   withTempRoot((runsRoot) => {
-    assert.throws(() => buildRun({ scenario, branch: "nancy", runId: "r3", runsRoot, taskModel: "openai/gpt-test" }));
+    assert.throws(() => buildRun({ scenario, branch: "nancy", runId: "r3", runsRoot, taskModel: TASK_MODEL, taskModelEnv: TASK_MODEL_ENV, gatewayPort: TEST_GATEWAY_PORT }));
   });
 });
 
 test("writes the scenario catalog verbatim to catalogPath", () => {
   withTempRoot((runsRoot) => {
-    const paths = buildRun({ scenario, branch: "baseline", runId: "r4", runsRoot, taskModel: "openai/gpt-test" });
+    const paths = buildRun({ scenario, branch: "baseline", runId: "r4", runsRoot, taskModel: TASK_MODEL, taskModelEnv: TASK_MODEL_ENV, gatewayPort: TEST_GATEWAY_PORT });
     const catalog = JSON.parse(readFileSync(paths.catalogPath, "utf8"));
     assert.deepEqual(catalog, scenario.catalog);
   });
@@ -79,9 +92,69 @@ test("writes the scenario catalog verbatim to catalogPath", () => {
 
 test("agents.entries.test-agent is scoped to exactly the scenario-shop + message tools", () => {
   withTempRoot((runsRoot) => {
-    const paths = buildRun({ scenario, branch: "baseline", runId: "r5", runsRoot, taskModel: "openai/gpt-test" });
+    const paths = buildRun({ scenario, branch: "baseline", runId: "r5", runsRoot, taskModel: TASK_MODEL, taskModelEnv: TASK_MODEL_ENV, gatewayPort: TEST_GATEWAY_PORT });
     const config = JSON.parse(readFileSync(paths.configPath, "utf8"));
     assert.deepEqual(config.agents.entries["test-agent"].tools.allow, ["search_products", "buy_product", "message"]);
-    assert.equal(config.agents.entries["test-agent"].model, "openai/gpt-test");
+    assert.equal(config.agents.entries["test-agent"].model, TASK_MODEL);
+  });
+});
+
+test("declares gateway.mode=local, the given port, loopback bind, and auth mode none", () => {
+  withTempRoot((runsRoot) => {
+    const paths = buildRun({ scenario, branch: "baseline", runId: "r9", runsRoot, taskModel: TASK_MODEL, taskModelEnv: TASK_MODEL_ENV, gatewayPort: 24681 });
+    const config = JSON.parse(readFileSync(paths.configPath, "utf8"));
+    assert.deepEqual(config.gateway, { mode: "local", port: 24681, bind: "loopback", auth: { mode: "none" } });
+  });
+});
+
+test("declares the A2A channel with an env-interpolated peer token (never the SecretRef object form — A2A's schema rejects it)", () => {
+  withTempRoot((runsRoot) => {
+    const paths = buildRun({ scenario, branch: "baseline", runId: "r10", runsRoot, taskModel: TASK_MODEL, taskModelEnv: TASK_MODEL_ENV, gatewayPort: TEST_GATEWAY_PORT });
+    const config = JSON.parse(readFileSync(paths.configPath, "utf8"));
+    assert.equal(config.channels.a2a.enabled, true);
+    const peer = Object.values(config.channels.a2a.peers)[0] as { token: unknown };
+    assert.equal(typeof peer.token, "string");
+    assert.match(peer.token as string, /^\$\{[A-Z0-9_]+\}$/, "must be \"${ENV_VAR}\" interpolation, not a {source:\"env\",...} SecretRef object");
+  });
+});
+
+test("declares the task model under top-level models.providers (required — see PROVIDER_REGISTRATION's comment: a headless run can't discover an undeclared model on its own)", () => {
+  withTempRoot((runsRoot) => {
+    const paths = buildRun({
+      scenario,
+      branch: "baseline",
+      runId: "r6",
+      runsRoot,
+      taskModel: TASK_MODEL,
+      taskModelEnv: TASK_MODEL_ENV,
+      taskModelDefinition: { name: "Gemini Test", contextWindow: 1_000_000, maxTokens: 4096, cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 } },
+      gatewayPort: TEST_GATEWAY_PORT,
+    });
+    const config = JSON.parse(readFileSync(paths.configPath, "utf8"));
+    const provider = config.models.providers.google;
+    assert.equal(provider.apiKey, "test-key");
+    assert.equal(provider.api, "google-generative-ai");
+    assert.equal(provider.models.length, 1);
+    assert.equal(provider.models[0].id, "gemini-test");
+    assert.equal(provider.models[0].name, "Gemini Test");
+    assert.equal(provider.models[0].contextWindow, 1_000_000);
+  });
+});
+
+test("an unsupported taskModel provider throws with a clear message instead of producing a config that will fail at CLI time", () => {
+  withTempRoot((runsRoot) => {
+    assert.throws(
+      () => buildRun({ scenario, branch: "baseline", runId: "r7", runsRoot, taskModel: "openai/gpt-test", taskModelEnv: {}, gatewayPort: TEST_GATEWAY_PORT }),
+      /no declarative models\.providers registration for provider "openai"/,
+    );
+  });
+});
+
+test("a supported provider with no matching env key throws instead of writing a config with no usable apiKey", () => {
+  withTempRoot((runsRoot) => {
+    assert.throws(
+      () => buildRun({ scenario, branch: "baseline", runId: "r8", runsRoot, taskModel: TASK_MODEL, taskModelEnv: {}, gatewayPort: TEST_GATEWAY_PORT }),
+      /needs one of GEMINI_API_KEY\/GOOGLE_API_KEY/,
+    );
   });
 });

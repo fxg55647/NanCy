@@ -1,0 +1,26 @@
+// Merge this into the TEST PROFILE's openclaw.json (never the operator's
+// live config without an explicit, in-the-moment request — see README.md's
+// "Testing safely"). Not consumed programmatically by anything in this repo;
+// it's documentation of the exact block to add.
+{
+  channels: {
+    a2a: {
+      enabled: true,
+      // Loopback-only test profile: omit advertisedUrl and let the plugin
+      // derive it from the incoming request, per the A2A channel doc.
+      peers: {
+        "mobile-poc": {
+          // Set NANCY_MOBILE_POC_TOKEN in the Gateway process's own
+          // environment before starting it. Never put the literal token in
+          // this file or in source control. `peers.<name>.token` requires a
+          // plain string — confirmed via `openclaw doctor` — so unlike some
+          // other channel configs (e.g. Buzz's privateKey), it does NOT
+          // accept a {source:"env",...} SecretRef object. Env-var
+          // interpolation is the equivalent that still keeps the literal
+          // value out of this file.
+          token: "${NANCY_MOBILE_POC_TOKEN}",
+        },
+      },
+    },
+  },
+}

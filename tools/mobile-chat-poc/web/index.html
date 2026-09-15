@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="fi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Nancy mobile chat POC</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f5f4;
+    --panel: #ffffff;
+    --text: #1c1c1c;
+    --muted: #6b6b6b;
+    --border: #ddd;
+    --you-bubble: #2563eb;
+    --you-text: #ffffff;
+    --nancy-bubble: #eceae6;
+    --nancy-text: #1c1c1c;
+    --error: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17181a;
+      --panel: #212226;
+      --text: #f0f0f0;
+      --muted: #9a9a9a;
+      --border: #3a3b3e;
+      --nancy-bubble: #34363b;
+      --nancy-text: #f0f0f0;
+      --error: #ff6b6b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+  header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  header h1 {
+    font-size: 15px;
+    margin: 0;
+    font-weight: 600;
+  }
+  header .status {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  header button {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 6px;
+    padding: 5px 9px;
+    font-size: 12px;
+  }
+  #settings {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    display: grid;
+    gap: 8px;
+    background: var(--panel);
+  }
+  #settings label {
+    font-size: 12px;
+    color: var(--muted);
+    display: block;
+    margin-bottom: 3px;
+  }
+  #settings input {
+    width: 100%;
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+  }
+  #settings .row {
+    display: flex;
+    gap: 8px;
+  }
+  #settings .row > div { flex: 1; min-width: 0; }
+  #log {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .bubble {
+    max-width: 82%;
+    padding: 10px 13px;
+    border-radius: 14px;
+    font-size: 15px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .you {
+    align-self: flex-end;
+    background: var(--you-bubble);
+    color: var(--you-text);
+    border-bottom-right-radius: 4px;
+  }
+  .nancy {
+    align-self: flex-start;
+    background: var(--nancy-bubble);
+    color: var(--nancy-text);
+    border-bottom-left-radius: 4px;
+  }
+  .sys {
+    align-self: center;
+    color: var(--muted);
+    font-size: 12px;
+    text-align: center;
+  }
+  .err {
+    align-self: flex-start;
+    color: var(--error);
+    font-size: 13px;
+  }
+  form {
+    display: flex;
+    gap: 8px;
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border);
+    background: var(--panel);
+  }
+  #text {
+    flex: 1;
+    padding: 11px 13px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 15px;
+    min-width: 0;
+  }
+  button[type="submit"] {
+    padding: 0 18px;
+    border-radius: 20px;
+    border: none;
+    background: var(--you-bubble);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  button:disabled { opacity: 0.5; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Nancy mobile chat POC</h1>
+    <div class="status" id="status">ei yhdistetty</div>
+  </div>
+  <button id="toggleSettings" type="button">Asetukset</button>
+</header>
+
+<div id="settings">
+  <div class="row">
+    <div>
+      <label for="url">A2A-osoite (esim. http://192.168.1.20:18789/a2a/v1)</label>
+      <input id="url" type="text" autocomplete="off" />
+    </div>
+  </div>
+  <div class="row">
+    <div>
+      <label for="token">Bearer-token</label>
+      <input id="token" type="password" autocomplete="off" />
+    </div>
+  </div>
+  <div class="row">
+    <button id="newConversation" type="button">Aloita uusi keskustelu</button>
+  </div>
+</div>
+
+<div id="log"></div>
+
+<form id="composer">
+  <input id="text" type="text" placeholder="Kirjoita viesti…" autocomplete="off" />
+  <button type="submit">Lähetä</button>
+</form>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const log = $("log");
+  const statusEl = $("status");
+  const urlInput = $("url");
+  const tokenInput = $("token");
+  const composer = $("composer");
+  const textInput = $("text");
+  const settingsPanel = $("settings");
+
+  const STORAGE_KEY = "nancy-mobile-poc";
+
+  function loadSettings() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  }
+  function saveSettings(patch) {
+    try {
+      const current = loadSettings();
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...current, ...patch }));
+    } catch {
+      // localStorage unavailable (private mode, etc.) — settings just won't persist.
+    }
+  }
+
+  const settings = loadSettings();
+  urlInput.value = settings.url ?? "";
+  tokenInput.value = settings.token ?? "";
+  let contextId = settings.contextId ?? null;
+  settingsPanel.hidden = Boolean(settings.url && settings.token);
+
+  urlInput.addEventListener("change", () => saveSettings({ url: urlInput.value.trim() }));
+  tokenInput.addEventListener("change", () => saveSettings({ token: tokenInput.value.trim() }));
+
+  $("toggleSettings").addEventListener("click", () => {
+    settingsPanel.hidden = !settingsPanel.hidden;
+  });
+
+  $("newConversation").addEventListener("click", () => {
+    contextId = null;
+    saveSettings({ contextId: null });
+    log.innerHTML = "";
+    addSystem("Uusi keskustelu aloitettu.");
+  });
+
+  function addBubble(kind, text) {
+    const el = document.createElement("div");
+    el.className = "bubble " + kind;
+    el.textContent = text;
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+    return el;
+  }
+  function addSystem(text) {
+    const el = document.createElement("div");
+    el.className = "sys";
+    el.textContent = text;
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+  }
+  function addError(text) {
+    const el = document.createElement("div");
+    el.className = "bubble err";
+    el.textContent = "⚠ " + text;
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function uuid() {
+    if (crypto.randomUUID) return crypto.randomUUID();
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0;
+      const v = c === "x" ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+  }
+
+  function extractTaskText(task) {
+    const parts = (task?.artifacts ?? []).flatMap((a) => a.parts ?? []);
+    const text = parts
+      .filter((p) => typeof p.text === "string" && p.text.length > 0)
+      .map((p) => p.text)
+      .join("\n");
+    return text || `[ei vastaustekstiä — tila: ${task?.status?.state ?? "tuntematon"}]`;
+  }
+
+  async function callJsonRpc(url, token, method, params) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer " + token,
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: uuid(), method, params }),
+    });
+    let json;
+    try {
+      json = await res.json();
+    } catch {
+      throw new Error(`Palvelin vastasi ei-JSON-sisällöllä (HTTP ${res.status})`);
+    }
+    if (json.error) {
+      throw new Error(`A2A-virhe ${json.error.code ?? "?"}: ${json.error.message ?? JSON.stringify(json.error)}`);
+    }
+    return json.result;
+  }
+
+  async function sendMessage(text) {
+    const url = urlInput.value.trim();
+    const token = tokenInput.value.trim();
+    if (!url || !token) throw new Error("Täytä ensin A2A-osoite ja token asetuksista.");
+
+    const params = {
+      message: { messageId: uuid(), role: "ROLE_USER", parts: [{ text }] },
+    };
+    if (contextId) params.contextId = contextId;
+
+    const result = await callJsonRpc(url, token, "SendMessage", params);
+    const task = result?.task;
+    if (!task) throw new Error("Vastauksessa ei ollut task-kenttää.");
+    if (task.contextId) {
+      contextId = task.contextId;
+      saveSettings({ contextId });
+    }
+    return extractTaskText(task);
+  }
+
+  composer.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const text = textInput.value.trim();
+    if (!text) return;
+    addBubble("you", text);
+    textInput.value = "";
+    textInput.disabled = true;
+    statusEl.textContent = "lähetetään…";
+    try {
+      const reply = await sendMessage(text);
+      addBubble("nancy", reply);
+      statusEl.textContent = "yhdistetty";
+    } catch (err) {
+      addError(err instanceof Error ? err.message : String(err));
+      statusEl.textContent = "virhe";
+    } finally {
+      textInput.disabled = false;
+      textInput.focus();
+    }
+  });
+
+  statusEl.textContent = urlInput.value ? "valmis" : "täytä asetukset";
+  addSystem('Vastaa "y" vahvistaaksesi Nancyn kysymän luvan.');
+})();
+</script>
+</body>
+</html>
