@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Behavior Comparator — NanCy SSIL</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1a1a1a; --muted: #5b6472; --border: #e2e5ea;
+  --accent: #7c3aed; --code-bg: #f4f4f7; --nav-bg: #fafafa;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14161c; --fg: #eef0f4; --muted: #9aa3b2; --border: #2a2e38;
+    --accent: #b794f6; --code-bg: #1c1f27; --nav-bg: #191b22;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); }
+.layout { display: flex; min-height: 100vh; }
+nav.sidebar { width: 260px; flex-shrink: 0; background: var(--nav-bg); border-right: 1px solid var(--border); padding: 24px 16px; }
+nav.sidebar h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 20px 0 6px; }
+nav.sidebar ul { list-style: none; margin: 0; padding: 0; }
+nav.sidebar li a { display: block; padding: 4px 8px; border-radius: 6px; text-decoration: none; color: var(--fg); font-size: 14px; }
+nav.sidebar li a[aria-current="page"] { background: var(--accent); color: #fff; }
+nav.sidebar li a:hover { background: var(--border); }
+.brand { font-weight: 700; font-size: 18px; margin-bottom: 4px; }
+.brand-sub { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+main { flex: 1; min-width: 0; padding: 40px clamp(16px, 5vw, 64px); max-width: 860px; }
+main h1:first-child { margin-top: 0; }
+pre { background: var(--code-bg); padding: 14px 16px; overflow-x: auto; border-radius: 8px; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; overflow-x: auto; display: block; }
+th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+blockquote { border-left: 3px solid var(--accent); margin: 0; padding: 0 16px; color: var(--muted); }
+img { max-width: 100%; }
+footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+#nav-toggle { display: none; }
+.nav-toggle-label { display: none; }
+@media (max-width: 800px) {
+  .layout { display: block; }
+  nav.sidebar { width: auto; border-right: none; border-bottom: 1px solid var(--border); }
+  #nav-toggle:not(:checked) ~ .layout nav.sidebar .nav-body { display: none; }
+  .nav-toggle-label { display: block; padding: 16px; cursor: pointer; font-weight: 600; }
+}
+</style>
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="layout">
+<nav class="sidebar">
+<label class="nav-toggle-label" for="nav-toggle">☰ Docs menu</label>
+<div class="nav-body">
+<div class="brand">NanCy SSIL</div>
+<div class="brand-sub"><a href="https://github.com/fxg55647/NanCy">GitHub ↗</a></div>
+<div class="nav-group"><h2>Overview</h2><ul><li><a href="../index.html">NanCy SSIL</a></li><li><a href="../claude.html">CLAUDE</a></li><li><a href="../how-agents-go-wrong.html">HOW AGENTS GO WRONG</a></li><li><a href="../incidents.html">INCIDENTS</a></li><li><a href="../misconceptions.html">MISCONCEPTIONS</a></li><li><a href="../nancy-policy.html">NANCY POLICY</a></li><li><a href="../related-work.html">RELATED WORK</a></li><li><a href="../security-philosophy.html">SECURITY PHILOSOPHY</a></li><li><a href="../testing.html">TESTING</a></li></ul></div><div class="nav-group"><h2>Architecture</h2><ul><li><a href="arweave-integrity-anchoring.html">Arweave Integrity Anchoring</a></li><li><a href="behavior-comparator.html" aria-current="page">Behavior Comparator</a></li><li><a href="debate-review.html">Debate Review</a></li><li><a href="denial-escalation-and-clarification.html">Denial Escalation And Clarification</a></li><li><a href="gap-detection.html">Gap Detection</a></li><li><a href="policy-precedence.html">Policy Precedence</a></li></ul></div><div class="nav-group"><h2>Audits</h2><ul><li><a href="../audits/2026-09-14-security-review.html">2026 09 14 Security Review</a></li></ul></div>
+</div>
+</nav>
+<main>
+<h1 id="behavior-comparator">Behavior Comparator</h1>
+<p>Status: <strong>v1, one scenario, calibration-run mode only</strong>. This is the design record for <code>tools/checkpoint-recorder/</code>, <code>tools/scenario-shop/</code>, and <code>tools/comparator/</code> — read it before extending any of them, so later changes stay consistent with the decisions below instead of silently drifting from them. None of this is part of NanCy itself; it&#39;s a dev-only instrument that runs <em>alongside</em> NanCy (or without it) to observe the difference.</p>
+<h2 id="why-this-exists">Why this exists</h2>
+<p>NanCy&#39;s own test suite (<code>test/*.test.ts</code>, <code>scripts/run-eval.mts</code>) proves NanCy&#39;s verdict logic works, by calling <code>handlers.before_tool_call(...)</code> directly with hand-picked params. It has never proven what a <em>real</em> OpenClaw agent, running a real agentic loop against a real model, actually does differently because NanCy is or isn&#39;t in the loop — whether it asks a clarifying question it wouldn&#39;t otherwise ask, whether a vague request turns into a cheaper or more scoped purchase, or whether NanCy just adds friction with no visible effect on the outcome. The comparator runs the same ambiguous or precise shopping task twice — once with a bare OpenClaw agent, once with NanCy loaded — against a fully simulated shop (no real network, no real purchase), and reports what actually differed, per run, traceable to real events.</p>
+<h2 id="pieces">Pieces</h2>
+<ul>
+<li><strong><code>tools/checkpoint-recorder/</code></strong> — a passive OpenClaw plugin (built first, independent of the comparator) that captures the full model context (<code>llm_input</code>: systemPrompt/prompt/historyMessages/tools) and every tool call&#39;s proposed params (<code>before_tool_call</code>) and, when it actually ran, its result (<code>after_tool_call</code>), correlated by <code>toolCallId</code>. It never returns a hook result, so it can never block, alter, or authorize anything.</li>
+<li><strong><code>tools/scenario-shop/</code></strong> — a fully local OpenClaw plugin providing <code>search_products</code>/<code>buy_product</code> tools, backed by a per-run JSON catalog and purchase-log file. No network calls anywhere in it.</li>
+<li><strong><code>tools/comparator/</code></strong> — the driver: builds an isolated OpenClaw profile per run, spawns the real <code>openclaw</code> CLI turn by turn, runs a user-simulator, and produces the report.</li>
+</ul>
+<h2 id="key-decisions-and-what-grounds-them">Key decisions, and what grounds them</h2>
+<h3 id="openclaw-agent---local---session-key-not-agent-exec"><code>openclaw agent --local --session-key</code>, not <code>agent exec</code></h3>
+<p><code>openclaw agent exec</code> (&quot;Run one isolated headless embedded agent turn&quot;) looks like the obvious fit, but it&#39;s always a fresh <code>randomUUID()</code> session in a throwaway temp state dir, deleted after the call (<code>node_modules/openclaw/dist/agent-exec-*.mjs</code>) — there is no way to continue a conversation across two <code>agent exec</code> calls. The comparator needs a real multi-turn conversation (the user-simulator answering a clarifying question, then NanCy&#39;s own confirmation dance), so it uses plain <code>openclaw agent --local --agent test-agent --session-key &lt;key&gt; --message &quot;&lt;text&gt;&quot; --json</code> instead, repeated with the same <code>--session-key</code>. This resolves against a real disk-backed session store (<code>plugin-sdk/session-store-runtime</code>), so two separate CLI invocations genuinely continue one conversation — the same pattern <code>TESTING.md</code>&#39;s &quot;Option B&quot; already documents for driving NanCy&#39;s confirmation dance.</p>
+<p><code>--auth-env-only</code> is required to avoid a false sense of isolation: <code>--isolated</code> alone still resolves the <em>ambient</em> stored auth-profile store for credentials (verified against <code>agent-exec-*.mjs</code>&#39;s <code>resolveExecBaseConfig</code>); only <code>--auth-env-only</code> plus explicitly-injected env vars guarantees no real stored operator credentials leak into a comparator run. <code>driver.ts</code> sets <code>OPENCLAW_STATE_DIR</code>/<code>OPENCLAW_CONFIG_PATH</code> directly on the spawned child&#39;s env, per run — the same mechanism <code>--profile &lt;name&gt;</code> uses under the hood, but fully under this harness&#39;s control (a disposable temp dir, never <code>~/.openclaw*</code>).</p>
+<h3 id="withwithout-nancy-must-be-two-separate-profiles-not-two-agents-in-one-config">With/without NanCy must be two separate profiles, not two agents in one config</h3>
+<p>OpenClaw&#39;s plugin loading (<code>plugins.load.paths</code>/<code>plugins.entries</code>) is gateway-global; there is no per-agent plugin on/off switch (<code>agents.entries.&lt;id&gt;.tools.allow/deny</code> only scopes <em>tool exposure</em>, not which plugins are loaded). So <code>config-builder.ts</code> writes a full separate <code>openclaw.json</code> per <code>(scenario, branch, run)</code> — the <code>baseline</code> branch&#39;s <code>plugins.load.paths</code> never includes the NanCy repo root at all; the <code>nancy</code> branch&#39;s does.</p>
+<h3 id="the-confirmation-dance-depends-on-the-target-agents-own-agentsmd">The confirmation dance depends on the target agent&#39;s own <code>AGENTS.md</code></h3>
+<p>NanCy&#39;s confirmation protocol is agent-initiated: the <em>target agent</em>, not NanCy, has to know to proactively send the exact <code>&quot;Formal confirmation: ...\nReply y to proceed, any other reply cancels.\n[ID]&quot;</code> template before any web-sending action, per README.md&#39;s &quot;Add task confirmation rules to your agent&quot; section. Without that instruction in the test agent&#39;s own workspace <code>AGENTS.md</code>, a NanCy-branch agent has no reason to ever produce a message <code>parseConfirmationRequest</code> recognizes — the comparator would then misread &quot;the agent never learned to ask&quot; as &quot;NanCy blocks this outright.&quot; <code>config-builder.ts</code> writes README.md&#39;s exact snippet into <code>nancy</code> branch runs&#39; workspace <code>AGENTS.md</code> (verbatim, not paraphrased) — and <em>not</em> into <code>baseline</code> branch runs, which should behave like an ordinary OpenClaw agent with no NanCy-specific instructions at all.</p>
+<h3 id="nancy-denies-it-doesnt-re-prompt--the-clarifying-profile-has-to-work-around-that">NanCy denies, it doesn&#39;t re-prompt — the clarifying profile has to work around that</h3>
+<p><code>isAffirmativeReply</code> (<code>src/confirmation/protocol.ts</code>) only accepts an exact standalone <code>y</code>/<code>yes</code>; <code>message_received</code> deletes the pending confirmation and logs <code>confirmation_denied</code> for anything else, with no second chance at the same confirmation. So the &quot;täsmentävä&quot; (clarifying) user-simulator profile can&#39;t combine &quot;here&#39;s my budget&quot; and &quot;y&quot; in one reply to a gap-noted confirmation — that would just deny it. Instead (<code>user-simulator.ts</code>&#39;s <code>decideUserReply</code>), when a confirmation carries NanCy&#39;s gap-detection note (<code>🔍 NanCy note: ...</code>) and the budget hasn&#39;t been revealed yet, the simulator replies with the budget statement alone — denying that confirmation — on the expectation that a reasonable agent re-proposes a more specific one next turn, which the simulator then confirms with a bare <code>y</code>. This is a real, observable friction point worth surfacing in the report, not something to hide by giving the simulator powers a real user wouldn&#39;t have.</p>
+<h3 id="search_products-requires-a-confirmed-task-too--this-is-nancys-real-intentional-default"><code>search_products</code> requires a confirmed task too — this is NanCy&#39;s real, intentional default</h3>
+<p><code>shouldAnalyze()</code> (<code>src/policy/tool-policy.ts</code>) defaults an unrecognized tool name to <code>true</code> (&quot;requires analysis&quot;) — only a small explicit <code>PASSIVE_TOOLS</code> allowlist skips review, and the <code>allowUnconfirmedInfoLookups</code> fallback is scoped to exactly <code>web_search</code>/<code>web_fetch</code>, not any custom tool. NanCy has never heard of <code>search_products</code>, so in the <code>nancy</code> branch even a plain catalog <em>search</em> hard-blocks with <code>blocked_no_confirmed_task</code> until a task is confirmed — before the agent gets anywhere near a purchase. This isn&#39;t a comparator bug to route around (e.g. by teaching NanCy&#39;s real policy the name <code>search_products</code>, which would invalidate the comparison); it&#39;s a genuine, intentional NanCy behavior — fail-closed toward tools it&#39;s never seen — and the report should show it as such when it happens.</p>
+<h3 id="no-mainworker-split-in-this-harness-yet">No main/worker split in this harness (yet)</h3>
+<p><code>mainSessionKey</code>/<code>workerAgentId</code> are left unset in the <code>nancy</code> branch&#39;s config, so NanCy runs its non-split deployment mode (&quot;every session treated the same,&quot; per README) rather than spawning an isolated worker session per confirmed task. This is a v1 scope choice, not a limitation of NanCy itself — it keeps the driver from having to locate and poll a second, dynamically-named worker session. Testing the main/worker-split deployment mode is future work.</p>
+<h3 id="three-source-event-correlation-not-recorder-only">Three-source event correlation, not recorder-only</h3>
+<p>A plugin&#39;s <code>before_tool_call</code> handler never sees another plugin&#39;s returned hook result — the recorder genuinely cannot tell, on its own, whether a proposed call was blocked by NanCy or simply never got its <code>after_tool_call</code> for some other reason (see <code>checkpoint-recorder</code>&#39;s <code>outcome: &quot;unknown&quot;</code> — deliberately never guessed as &quot;blocked&quot;). <code>correlate.ts</code> resolves this by merging three independently-sourced timelines per run: the recorder&#39;s own captures, NanCy&#39;s own <code>nancy.log</code>/<code>nancy-analysis.log</code> (authoritative for its actual verdicts and blockReasons — searched recursively under the run directory, since this harness has not empirically confirmed exactly where OpenClaw resolves <code>api.rootDir</code> under an isolated <code>OPENCLAW_STATE_DIR</code>), and the driver&#39;s own record of every user-simulator turn. <code>evaluate.ts</code> computes every reported fact from this merged timeline plus the scenario-shop purchase-log file — never from free model narration.</p>
+<h3 id="preferences-vs-authorization-limits">Preferences vs. authorization limits</h3>
+<p>The scenario file&#39;s <code>userSimulator.budgetEur</code> is a <em>hidden</em> fact the simulator may reveal — it is never itself scored as an authorization limit. <code>evaluate.ts</code>&#39;s <code>budgetRespected</code> is computed only against what a run&#39;s user-simulator <em>actually said</em> in that run (<code>DriverTurnLog.userTurns[].revealedBudgetEur</code>), never against the scenario fixture directly — a hidden preference that was never voiced in a given run cannot be &quot;violated&quot; in that run.</p>
+<h2 id="usage">Usage</h2>
+<pre><code class="language-bash">node --experimental-strip-types tools/comparator/src/run-comparison.ts \
+  --scenario=tools/comparator/scenarios/laptop-vague-request.json \
+  --model-config=&lt;path to a local, gitignored JSON credentials file&gt;
+</code></pre>
+<p><code>model-config.json</code>:</p>
+<pre><code class="language-json">{
+  &quot;taskModel&quot;: &quot;openai/gpt-4.1-mini&quot;,
+  &quot;env&quot;: { &quot;OPENAI_API_KEY&quot;: &quot;sk-...&quot; },
+  &quot;analysis&quot;: { &quot;provider&quot;: &quot;openai&quot;, &quot;model&quot;: &quot;gpt-4.1-mini&quot;, &quot;apiKey&quot;: &quot;sk-...&quot; }
+}
+</code></pre>
+<p><code>env</code> is injected verbatim into each spawned <code>openclaw</code> child process (paired with <code>--auth-env-only</code>, so no ambient stored credentials are used). <code>analysis</code> is NanCy&#39;s own reviewer-model config, used only for <code>nancy</code>-branch runs, read the same way <code>scripts/run-eval.mts</code> already reads it from a live <code>openclaw.json</code> — never copy <code>channels</code>/<code>telegram</code> config into a comparator run. <strong>This makes real, billed model API calls</strong> for both the task model and (nancy branch) NanCy&#39;s analysis model — bounded by the scenario file&#39;s own <code>limits.maxTurns</code>/<code>limits.maxWallClockMs</code>, not by this harness guessing a safe default.</p>
+<p>Output lands under <code>--out</code> (default <code>tools/comparator/runs/run-&lt;timestamp&gt;/</code>, gitignored): <code>results.json</code> (structured facts), <code>SUMMARY.md</code> (per-scenario/profile paragraphs), <code>report.html</code> (single self-contained file, open locally).</p>
+<h2 id="known-limitations">Known limitations</h2>
+<ul>
+<li><strong>Not yet empirically run against a real model.</strong> Every module here typechecks and has unit coverage for its pure logic (user-simulator decisions, config shape, event evaluation, report text), but <code>driver.ts</code>&#39;s actual CLI-spawning path — the one part that can&#39;t be unit tested without spending real API budget — has not had a real smoke run yet. The most likely thing to need adjustment on first real run: <code>driver.ts</code>&#39;s <code>extractAssistantText()</code>, which parses the <code>--json</code> envelope. That shape is confirmed for <code>agent exec</code> specifically (<code>classifyAgentExecResult</code> in <code>agent-exec-*.mjs</code>: <code>{ok, status, final, payloads: [{text,...}], ...}</code>); plain <code>agent --json</code> (used here, for session continuity) was not independently confirmed to share it. <code>extractAssistantText()</code> is the single place to fix if it differs.</li>
+<li><strong>Checkpoint-replay mode is not built.</strong> Only the &quot;OpenClaw calibration run&quot; mode from the original spec exists — replaying a recorded checkpoint&#39;s context directly against the model (cheaper, higher-volume, but unverified against real OpenClaw behavior until calibrated) is future work.</li>
+<li><strong>One scenario.</strong> <code>scenarios/laptop-vague-request.json</code> is the only one; the harness is built to make adding more just a matter of new scenario JSON files (see <code>scenario.ts</code>/<code>types.ts</code>), not code changes.</li>
+<li><strong>No repeated-run statistics.</strong> Each <code>(scenario, branch, profile)</code> combination runs once. Model responses aren&#39;t deterministic, so a single run pair is a data point, not proof of a systematic difference — every generated report says this explicitly. Multi-run distributions (&quot;7/10 runs...&quot;) are future work.</li>
+<li><strong>No model-based evaluator or self-report branch.</strong> All facts in <code>results.json</code>/reports are computed directly from events (see <code>evaluate.ts</code>), per the original spec&#39;s requirement that measured facts and any model interpretation stay clearly separated. Nothing here asks a model to grade or explain a run.</li>
+<li><strong>The HTML report is the text-comparison core only.</strong> No expandable parallel timeline UI yet — <code>report.html</code>&#39;s per-scenario card includes a plain <code>&lt;details&gt;</code> list of supporting events, not a rendered side-by-side timeline.</li>
+</ul>
+<h2 id="test-coverage">Test coverage</h2>
+<ul>
+<li><code>tools/checkpoint-recorder/test/recorder.test.ts</code> — proposed/executed/errored/unknown tool-call outcomes, <code>toolCallId</code> correlation under concurrent same-named calls, partial-run flush on <code>session_end</code>/<code>gateway_stop</code>, secret redaction.</li>
+<li><code>tools/scenario-shop/test/scenario-shop.test.ts</code> — exercises the real <code>defineToolPlugin</code>/<code>registerTool</code> wiring (not a reimplementation), catalog search/filter/fallback, purchase recording and total-price calculation, rejection of an unknown product id.</li>
+<li><code>tools/comparator/test/user-simulator.test.ts</code> — the confirmation-vs-deny nuance above is the one most likely to silently regress; covered directly, along with both profiles&#39; question-answering and stop conditions.</li>
+<li><code>tools/comparator/test/config-builder.test.ts</code> — baseline never loads NanCy or writes <code>AGENTS.md</code>; the nancy branch does both and disables Telegram; a nancy-branch config with no analysis model throws rather than loading NanCy unconfigured.</li>
+<li><code>tools/comparator/test/evaluate.test.ts</code> — purchase/budget facts read from the purchase-log file and revealed-budget turns only, never the scenario fixture directly; NanCy blocks/notes extracted from the merged timeline.</li>
+<li><code>tools/comparator/test/report.test.ts</code> — generated summary/HTML text contains the actual structured price/product facts, not placeholders, and an inconclusive run produces an explicit &quot;not enough evidence&quot; line rather than a fabricated claim.</li>
+</ul>
+<p><code>driver.ts</code> itself (the real <code>openclaw</code> CLI spawning) is integration-only — exercising it requires real model credentials and spends real API budget, so it is deliberately not part of the unit-test suite. See &quot;Usage&quot; above.</p>
+
+<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit f9070d4. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
+</main>
+</div>
+</body>
+</html>
