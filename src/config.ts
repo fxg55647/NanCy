@@ -128,6 +128,26 @@ export interface NancyConfig {
   // SECURITY-PHILOSOPHY.md's "limit how many X can be performed within a
   // given period." Default 10.
   unconfirmedInfoLookupLimitPerHour?: number;
+  // Lets an ordinary outbound chat reply (message_sending's general Intent
+  // Anchoring review, not a tool call) through to the normal semantic
+  // reviewer even when no task has been confirmed for the session, judged
+  // against a fixed generic "harmless small talk only" baseline instead of
+  // a real confirmed task (see buildUnconfirmedChatReplyTask). Without
+  // this, literally no outbound reply of any kind — not even a plain "hi"
+  // — can go out until a task is confirmed, since the only exemption is
+  // NanCy's own fixed confirmation-request template itself; this friction
+  // was found end-to-end via tools/mobile-chat-poc/'s real A2A test. The
+  // real reviewer still runs on every call either way — this only changes
+  // what it compares the message against when there is no confirmed task.
+  // The destination preflight check in message_sending still runs only for
+  // a real confirmed task, never for this synthetic baseline. See
+  // unconfirmedChatReplyLimitPerHour for the deterministic backstop.
+  // Default true.
+  allowUnconfirmedChatReplies?: boolean;
+  // Deterministic per-session cap on allowUnconfirmedChatReplies grants per
+  // fixed one-hour window, independent of the reviewer's own judgment — the
+  // same backstop rationale as unconfirmedInfoLookupLimitPerHour. Default 10.
+  unconfirmedChatReplyLimitPerHour?: number;
   // Advisory-only (never blocks/delays sending): a one-shot LLM check run
   // against a proposed confirmation's description, looking for concrete
   // decision points plausibly relevant to the task that were left

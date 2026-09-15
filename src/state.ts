@@ -52,6 +52,11 @@ export function createSessionState() {
   // session, reset once the window elapses rather than a true sliding window
   // (simpler, and the exact boundary doesn't matter for a soft cap like this).
   const infoLookupWindowBySession = new Map<string, { windowStart: number; count: number }>();
+  // Same rationale and shape as infoLookupWindowBySession, but a separate
+  // map/counter for allowUnconfirmedChatReplies (see config.ts) — chat
+  // replies and info lookups are independent risk categories with their
+  // own configured caps, so one grant never consumes the other's quota.
+  const chatReplyWindowBySession = new Map<string, { windowStart: number; count: number }>();
 
   function touchActivity(sessionKey: string): void {
     lastActivityMs.set(sessionKey, Date.now());
@@ -93,6 +98,19 @@ export function createSessionState() {
     if (!entry || now - entry.windowStart >= windowMs) {
       entry = { windowStart: now, count: 0 };
       infoLookupWindowBySession.set(key, entry);
+    }
+    if (entry.count >= limit) return false;
+    entry.count += 1;
+    return true;
+  }
+
+  function consumeChatReplyQuota(sessionKey: string | undefined, limit: number, windowMs: number): boolean {
+    const key = sessionKey ?? UNKNOWN_SESSION_KEY;
+    const now = Date.now();
+    let entry = chatReplyWindowBySession.get(key);
+    if (!entry || now - entry.windowStart >= windowMs) {
+      entry = { windowStart: now, count: 0 };
+      chatReplyWindowBySession.set(key, entry);
     }
     if (entry.count >= limit) return false;
     entry.count += 1;
@@ -149,6 +167,7 @@ export function createSessionState() {
     lastActivityMs.delete(key);
     sessionTriggerByKey.delete(key);
     infoLookupWindowBySession.delete(key);
+    chatReplyWindowBySession.delete(key);
   }
 
   return {
@@ -172,6 +191,7 @@ export function createSessionState() {
     getRecentCalls,
     getRecentReasoning,
     consumeInfoLookupQuota,
+    consumeChatReplyQuota,
     clearSession,
   };
 }

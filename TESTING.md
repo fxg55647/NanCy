@@ -295,6 +295,24 @@ gate, in every session type, regardless of what it actually did.
 - **Everything else** (e.g. a plain `read`, or `browser` with a passive
   `action`) skips analysis entirely and passes straight through — instant,
   free, no LLM call.
+- **`message_sending` (outbound replies, a separate hook from
+  `before_tool_call`) always gets a real LLM verdict, tool calls or not** —
+  a reply's own text can exfiltrate data or carry a prompt-injection payload
+  back out with no tool call involved. **With no confirmed task**, this used
+  to mean an empty-context reviewer would reasonably CLARIFY/BLOCK almost
+  any reply, including a plain "hi" — the only exemption was NanCy's own
+  fixed confirmation-request template. `allowUnconfirmedChatReplies`
+  (default **on**) applies the same fallback pattern as
+  `allowUnconfirmedInfoLookups` above: with no task, the reply still gets
+  the real reviewer, judged against a fixed "harmless small talk only"
+  baseline (`buildUnconfirmedChatReplyTask` in `confirmation/tasks.ts`),
+  capped independently by `unconfirmedChatReplyLimitPerHour` (default
+  10/session/hour) — see `test/unconfirmed-chat-reply.test.ts`. The
+  destination preflight check in `message_sending` still only ever runs for
+  a real confirmed task. Found via `tools/mobile-chat-poc/`'s real A2A
+  end-to-end test — a plain "hei" got blocked before this existed. Set
+  `allowUnconfirmedChatReplies: false` to go back to requiring a confirmed
+  task for every outbound reply.
 
 ## Live dry-run against the real Telegram bot, without the CLI harness
 

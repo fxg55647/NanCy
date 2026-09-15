@@ -218,6 +218,14 @@
         "type": "number",
         "description": "Deterministic per-session cap on allowUnconfirmedInfoLookups grants per fixed one-hour window, independent of the reviewer's own judgment. Default 10."
       },
+      "allowUnconfirmedChatReplies": {
+        "type": "boolean",
+        "description": "Lets an ordinary outbound chat reply (message_sending's general review, not a tool call) through to the real reviewer even when no task is confirmed for the session, judged against a fixed 'harmless small talk only' baseline instead of a real confirmed task. Without this, no outbound reply of any kind can be sent until a task is confirmed, since the only exemption is NanCy's own fixed confirmation-request template itself. The destination preflight check still runs only for a real confirmed task. See unconfirmedChatReplyLimitPerHour. Default true."
+      },
+      "unconfirmedChatReplyLimitPerHour": {
+        "type": "number",
+        "description": "Deterministic per-session cap on allowUnconfirmedChatReplies grants per fixed one-hour window, independent of the reviewer's own judgment. Default 10."
+      },
       "gapDetection": {
         "type": "boolean",
         "description": "Advisory LLM check run after the required confirmation security review, flagging concrete decision points left unspecified as a NanCy-authored note. Its own errors leave the accepted confirmation unmodified; missing or failed required security analysis still blocks sending. Default true."
