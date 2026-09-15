@@ -35,18 +35,20 @@ function withTempRoot(fn: (runsRoot: string) => void) {
   }
 }
 
-test("baseline branch never loads nancy and never writes AGENTS.md", () => {
+test("baseline branch never loads nancy, but does get the branch-neutral shopping-agent AGENTS.md (no confirmation section)", () => {
   withTempRoot((runsRoot) => {
     const paths = buildRun({ scenario, branch: "baseline", runId: "r1", runsRoot, taskModel: TASK_MODEL, taskModelEnv: TASK_MODEL_ENV, gatewayPort: TEST_GATEWAY_PORT });
     const config = JSON.parse(readFileSync(paths.configPath, "utf8"));
     assert.equal(config.plugins.entries.nancy, undefined);
     assert.equal(config.plugins.load.paths.length, 2, "baseline should only load scenario-shop + checkpoint-recorder");
     assert.deepEqual(config.plugins.allow, ["scenario-shop", "checkpoint-recorder"]);
-    assert.equal(existsSync(join(paths.workspaceDir, "AGENTS.md")), false);
+    const agentsMd = readFileSync(join(paths.workspaceDir, "AGENTS.md"), "utf8");
+    assert.ok(agentsMd.includes("search_products"), "baseline must still get the shopping-agent framing, or the model has no reason to use these tools");
+    assert.ok(!agentsMd.includes("Formal confirmation:"), "baseline must NOT get NanCy's confirmation-protocol instructions");
   });
 });
 
-test("nancy branch loads nancy's plugin dir, writes AGENTS.md, and sets telegram off", () => {
+test("nancy branch loads nancy's plugin dir, writes AGENTS.md with both the shopping-agent framing and the confirmation section, and sets telegram off", () => {
   withTempRoot((runsRoot) => {
     const paths = buildRun({
       scenario,
@@ -65,6 +67,7 @@ test("nancy branch loads nancy's plugin dir, writes AGENTS.md, and sets telegram
     assert.equal(config.plugins.entries.nancy.config.telegramAlerts, false);
     assert.equal(config.plugins.entries.nancy.config.analysis.apiKey, "test-key");
     const agentsMd = readFileSync(join(paths.workspaceDir, "AGENTS.md"), "utf8");
+    assert.ok(agentsMd.includes("search_products"), "nancy branch must also get the shopping-agent framing, not just the confirmation section");
     assert.ok(agentsMd.includes("Formal confirmation:"));
     assert.ok(agentsMd.includes("Reply y to proceed, any other reply cancels."));
     // The nancy plugin dir loaded is a fresh per-run copy nested under

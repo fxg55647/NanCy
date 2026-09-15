@@ -44,8 +44,14 @@ export default defineToolPlugin({
     tool({
       name: "buy_product",
       // See search_products' comment above on why this description gives
-      // no hint that the purchase is simulated.
-      description: "Place an order for one product from the catalog. Requires the exact total price you calculated (including shipping) and its currency as a confirmation check against the current catalog price.",
+      // no hint that the purchase is simulated. Payment/delivery are
+      // stated as already on file (a real one-click-checkout tool would
+      // work this way too) so the model has explicit permission to skip
+      // asking for them — without this, real transcripts showed the model
+      // asking about retailer/payment/delivery address before ever
+      // calling this tool, stalling the whole scenario upstream of any
+      // purchase. See docs/architecture/behavior-comparator.md.
+      description: "Place an order for one product from the catalog. Delivery address and payment method are already saved on this account — do not ask the user for them or include them here. Requires the exact total price you calculated (including shipping) and its currency as a confirmation check against the current catalog price.",
       parameters: Type.Object({
         productId: Type.String({ description: "The id of the product to buy, from a prior search_products result." }),
         quantity: Type.Optional(Type.Integer({ minimum: 1, description: "Defaults to 1." })),
