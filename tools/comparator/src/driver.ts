@@ -224,8 +224,20 @@ export function taskFailure(task: A2ATask | undefined): string | undefined {
 // "Blocking vs returnImmediately" tradeoff this mirrors.
 export async function sendA2ATurn(params: { url: string; token: string; text: string; contextId?: string; timeoutMs: number }): Promise<{ text: string; contextId?: string; taskId?: string; error?: string }> {
   const { url, token, text, contextId, timeoutMs } = params;
-  const sendParams: Record<string, unknown> = { message: { messageId: randomUUID(), role: "ROLE_USER", parts: [{ text }] } };
-  if (contextId) sendParams.contextId = contextId;
+  // contextId belongs on the message object itself, per OpenClaw's own
+  // A2aSendMessageParamsSchema (node_modules/openclaw/dist/channel-*.mjs:
+  // `object({ message: object({ ..., contextId: ... }), configuration: ...
+  // })` — there is no top-level contextId field at all). A real run showed
+  // every turn landing in a brand-new NanCy sessionKey
+  // (agent:test-agent:a2a:...:ctx-<uuid>, a fresh <uuid> each time) because
+  // a previously top-level `sendParams.contextId` was silently dropped by
+  // the server and it minted `ctx-${randomUUID()}` instead every time — so
+  // a "y" reply to a pending confirmation always arrived in a session that
+  // had never seen that confirmation, and fell through to the unconfirmed
+  // chat-reply path instead of resolving it.
+  const messageParams: Record<string, unknown> = { messageId: randomUUID(), role: "ROLE_USER", parts: [{ text }] };
+  if (contextId) messageParams.contextId = contextId;
+  const sendParams: Record<string, unknown> = { message: messageParams };
   const result = (await callA2A(url, token, "SendMessage", sendParams)) as { task?: A2ATask } | undefined;
   let task = result?.task;
   if (!task) throw new Error("A2A SendMessage response had no task");

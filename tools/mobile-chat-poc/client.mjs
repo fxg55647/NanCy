@@ -73,14 +73,18 @@ export async function pollUntilSettled(url, token, taskId, timeoutMs) {
 
 // Sends one chat turn and returns { text, contextId, taskId }.
 export async function sendMessage(opts, text, contextId) {
-  const params = {
-    message: {
-      messageId: randomUUID(),
-      role: "ROLE_USER",
-      parts: [{ text }],
-    },
+  const message = {
+    messageId: randomUUID(),
+    role: "ROLE_USER",
+    parts: [{ text }],
   };
-  if (contextId) params.contextId = contextId;
+  // contextId belongs on the message object itself, per OpenClaw's own
+  // A2aSendMessageParamsSchema — there is no top-level contextId field.
+  // A top-level one is silently ignored, so the server mints a fresh
+  // ctx-<uuid> on every turn and multi-turn continuity never actually
+  // engages, even though it looks like it should.
+  if (contextId) message.contextId = contextId;
+  const params = { message };
   if (opts.poll) params.configuration = { returnImmediately: true };
 
   const result = await callJsonRpc(opts.url, opts.token, "SendMessage", params);
