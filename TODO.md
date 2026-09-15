@@ -1,5 +1,10 @@
 # TODO
 
+## Mobiilisovellus — suunnitelma
+
+Katso [Nancy-mobiilisovelluksen TODO](docs/mobile-app-todo.md): kuvat, sanelu,
+paikallinen tekoäly, tehtävävahvistukset, työnkulut ja ehdotus ensimmäisen version rajaukseksi.
+
 ## Debate-style triple-pass review — experimental implementation
 
 See `docs/architecture/debate-review.md`: optional FOR/AGAINST/JUDGE full review via `analysis.debateMode` (`off`, `always`, `clarify`, `hybrid`). Default off. Mocked integration tests cover enforcement; comparative real-model safety, cost and latency evaluation remains outstanding, along with provider usage accounting.
