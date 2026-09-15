@@ -1,0 +1,17 @@
+{
+  "name": "nancy-behavior-comparator",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Dev-only harness: runs the same scenario through OpenClaw with and without NanCy loaded, and reports the differences. See ../../docs/architecture/behavior-comparator.md.",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "check": "npm run typecheck && npm test",
+    "run": "node --experimental-strip-types src/run-comparison.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.2",
+    "typescript": "^7.0.2"
+  }
+}

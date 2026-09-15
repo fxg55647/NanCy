@@ -1,0 +1,22 @@
+{
+  "name": "nancy-checkpoint-recorder",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Dev-only OpenClaw plugin that captures the full model context and decision for each agent run (llm_input/before_tool_call/llm_output), for offline replay/simulation. Not security-relevant on its own — see ../../CLAUDE.md.",
+  "openclaw": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "check": "npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.2",
+    "openclaw": "^2026.9.4",
+    "typescript": "^7.0.2"
+  }
+}

@@ -52,6 +52,10 @@ Work has been on the operational/runtime side: cron-triggered runs are gated lik
 - `nancy-integrity.log` — Arweave submission/confirmation journal; deliberately excluded from its own source set to avoid self-triggering anchors
 - `.nancy-integrity/anchor-state.json` — protected local head of the application-level Arweave chain
 
+## Dev-only instrumentation (`tools/`)
+
+Not part of the NanCy plugin itself — separate OpenClaw plugins/scripts used to observe and compare NanCy's effect on a real agent, never loaded by an operator's real gateway config. `tools/checkpoint-recorder/` captures the full model context + tool-call outcomes for any OpenClaw run. `tools/scenario-shop/` is a fully local simulated shop (`search_products`/`buy_product`) for scenario testing. `tools/comparator/` drives real `openclaw agent` runs through both a bare-OpenClaw and a NanCy-loaded isolated profile and reports the difference. See `docs/architecture/behavior-comparator.md`.
+
 ## Docs map
 
 - `README.md` — full feature list, config, getting-started (includes the `AGENTS.md` snippet NanCy expects the *target* OpenClaw agent to have — that's a different file in a different repo, not this one)
@@ -67,5 +71,6 @@ Work has been on the operational/runtime side: cron-triggered runs are gated lik
 - `docs/architecture/debate-review.md` — experimental optional FOR/AGAINST/JUDGE full review, implemented in `src/analysis/debate.ts`; `analysis.debateMode` defaults to off. Every mode fails closed on full-review errors, including outbound messages. Comparative real-model evaluation remains outstanding.
 - `docs/architecture/arweave-integrity-anchoring.md` — permanent hash-manifest source set, 15-minute changed-only cadence, chain/confirmation semantics, key handling, privacy limits, and verification
 - `docs/audits/2026-09-14-security-review.md` — repository-wide security review, reproduced findings, corrections, and verification evidence.
+- `docs/architecture/behavior-comparator.md` — the `tools/` dev instrumentation that runs a real OpenClaw agent with and without NanCy loaded and reports the difference; why `agent exec` was rejected for `agent --session-key`, why with/without-NanCy needs two isolated profiles, and the confirmation-dance/AGENTS.md dependency this depends on.
 - `TESTING.md` — how to test changes: `npm test` (mocked, fast) vs. a standalone harness against the real reviewer model (genuine verdicts, zero live-gateway risk), the confirmed-task file format, and why the live gateway must never be stopped/restarted for testing
 - `EVAL-RESULTS.md` — generated report from `scripts/run-eval.mts` (a fixed, hand-written scenario set in `scripts/eval-scenarios.json`, run against the real configured reviewer model via the Option B pattern). Regenerate with `node --experimental-strip-types scripts/run-eval.mts`; re-run whenever `analysis.model` or the policy/analysis modules change, to catch reviewer-behavior regressions.

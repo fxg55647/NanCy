@@ -1,0 +1,22 @@
+{
+  "name": "nancy-scenario-shop",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Dev-only OpenClaw plugin: a fully local, simulated shop (search_products/buy_product) for the behavior-comparator harness. No network access, no real side effects — see ../../CLAUDE.md and ../../docs/architecture/behavior-comparator.md.",
+  "openclaw": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "check": "npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.2",
+    "openclaw": "^2026.9.4",
+    "typescript": "^7.0.2"
+  }
+}

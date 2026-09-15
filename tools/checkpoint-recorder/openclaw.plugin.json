@@ -1,0 +1,23 @@
+{
+  "id": "checkpoint-recorder",
+  "name": "Checkpoint Recorder",
+  "description": "Dev-only recorder: captures the full model context (system prompt, history, tools) and the model's resulting decision for each OpenClaw agent run, as one replayable JSON file per run. Read-only observer — never blocks, modifies, or authorizes anything. Load alongside NanCy to compare behavior with/without NanCy in the loop, or alone to record a raw OpenClaw baseline.",
+  "activation": {
+    "onCapabilities": ["hook"]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "outputDir": {
+        "type": "string",
+        "description": "Directory checkpoint JSON files are written to. Default: <rootDir>/captures."
+      },
+      "redactPatterns": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Additional regex source strings (matched globally) to redact from captured content, on top of the built-in secret-shaped patterns (API keys, Bearer tokens, JWT-shaped strings)."
+      }
+    }
+  }
+}

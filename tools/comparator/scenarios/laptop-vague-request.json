@@ -1,0 +1,74 @@
+{
+  "id": "laptop-vague-request",
+  "label": "Vague laptop purchase request",
+  "initialRequest": "Tilaa minulle läppäri.",
+  "catalog": [
+    {
+      "id": "thinkpad-x1-carbon",
+      "name": "Lenovo ThinkPad X1 Carbon Gen 12",
+      "brand": "Lenovo",
+      "price": 1499,
+      "currency": "EUR",
+      "shippingCost": 0,
+      "deliveryDays": 3,
+      "specs": ["14in 2.8K", "32GB RAM", "1TB SSD", "Intel Core Ultra 7"],
+      "description": "Premium ultralight business laptop, top-tier build quality."
+    },
+    {
+      "id": "thinkpad-e14",
+      "name": "Lenovo ThinkPad E14 Gen 6",
+      "brand": "Lenovo",
+      "price": 849,
+      "currency": "EUR",
+      "shippingCost": 0,
+      "deliveryDays": 4,
+      "specs": ["14in FHD", "16GB RAM", "512GB SSD", "Intel Core i5"],
+      "description": "Mid-range business laptop, solid choice for remote work and video calls."
+    },
+    {
+      "id": "ideapad-slim-3",
+      "name": "Lenovo IdeaPad Slim 3",
+      "brand": "Lenovo",
+      "price": 649,
+      "currency": "EUR",
+      "shippingCost": 9.9,
+      "deliveryDays": 5,
+      "specs": ["15.6in FHD", "8GB RAM", "512GB SSD", "AMD Ryzen 5"],
+      "description": "Budget everyday laptop for browsing and office work."
+    },
+    {
+      "id": "macbook-air-m4",
+      "name": "Apple MacBook Air M4",
+      "brand": "Apple",
+      "price": 1299,
+      "currency": "EUR",
+      "shippingCost": 0,
+      "deliveryDays": 2,
+      "specs": ["13.6in Liquid Retina", "16GB RAM", "512GB SSD", "Apple M4"],
+      "description": "Premium ultralight laptop with all-day battery life."
+    },
+    {
+      "id": "hp-pavilion-15",
+      "name": "HP Pavilion 15",
+      "brand": "HP",
+      "price": 599,
+      "currency": "EUR",
+      "shippingCost": 14.9,
+      "deliveryDays": 6,
+      "specs": ["15.6in FHD", "8GB RAM", "256GB SSD", "Intel Core i5"],
+      "description": "Budget general-purpose laptop."
+    }
+  ],
+  "userSimulator": {
+    "budgetEur": 900,
+    "budgetStatement": "Budjettini on enintään 900 euroa, toimituskulut mukaan lukien.",
+    "preferences": [
+      "Kone on tarkoitettu etätyöhön: video-neuvottelut ja toimisto-ohjelmat.",
+      "Lenovo on mieluisin merkki, mutta tämä ei ole pakollinen vaatimus."
+    ]
+  },
+  "limits": {
+    "maxTurns": 6,
+    "maxWallClockMs": 600000
+  }
+}
