@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mobile App Todo — NanCy SSIL</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1a1a1a; --muted: #5b6472; --border: #e2e5ea;
+  --accent: #7c3aed; --code-bg: #f4f4f7; --nav-bg: #fafafa;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14161c; --fg: #eef0f4; --muted: #9aa3b2; --border: #2a2e38;
+    --accent: #b794f6; --code-bg: #1c1f27; --nav-bg: #191b22;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); }
+.layout { display: flex; min-height: 100vh; }
+nav.sidebar { width: 260px; flex-shrink: 0; background: var(--nav-bg); border-right: 1px solid var(--border); padding: 24px 16px; }
+nav.sidebar h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 20px 0 6px; }
+nav.sidebar ul { list-style: none; margin: 0; padding: 0; }
+nav.sidebar li a { display: block; padding: 4px 8px; border-radius: 6px; text-decoration: none; color: var(--fg); font-size: 14px; }
+nav.sidebar li a[aria-current="page"] { background: var(--accent); color: #fff; }
+nav.sidebar li a:hover { background: var(--border); }
+.brand { font-weight: 700; font-size: 18px; margin-bottom: 4px; }
+.brand-sub { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+main { flex: 1; min-width: 0; padding: 40px clamp(16px, 5vw, 64px); max-width: 860px; }
+main h1:first-child { margin-top: 0; }
+pre { background: var(--code-bg); padding: 14px 16px; overflow-x: auto; border-radius: 8px; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; overflow-x: auto; display: block; }
+th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+blockquote { border-left: 3px solid var(--accent); margin: 0; padding: 0 16px; color: var(--muted); }
+img { max-width: 100%; }
+footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+#nav-toggle { display: none; }
+.nav-toggle-label { display: none; }
+@media (max-width: 800px) {
+  .layout { display: block; }
+  nav.sidebar { width: auto; border-right: none; border-bottom: 1px solid var(--border); }
+  #nav-toggle:not(:checked) ~ .layout nav.sidebar .nav-body { display: none; }
+  .nav-toggle-label { display: block; padding: 16px; cursor: pointer; font-weight: 600; }
+}
+</style>
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="layout">
+<nav class="sidebar">
+<label class="nav-toggle-label" for="nav-toggle">☰ Docs menu</label>
+<div class="nav-body">
+<div class="brand">NanCy SSIL</div>
+<div class="brand-sub"><a href="https://github.com/fxg55647/NanCy">GitHub ↗</a></div>
+<div class="nav-group"><h2>Overview</h2><ul><li><a href="index.html">NanCy SSIL</a></li><li><a href="claude.html">CLAUDE</a></li><li><a href="how-agents-go-wrong.html">HOW AGENTS GO WRONG</a></li><li><a href="incidents.html">INCIDENTS</a></li><li><a href="misconceptions.html">MISCONCEPTIONS</a></li><li><a href="nancy-policy.html">NANCY POLICY</a></li><li><a href="related-work.html">RELATED WORK</a></li><li><a href="security-philosophy.html">SECURITY PHILOSOPHY</a></li><li><a href="testing.html">TESTING</a></li></ul></div><div class="nav-group"><h2>Docs</h2><ul><li><a href="mobile-app-todo.html" aria-current="page">Mobile App Todo</a></li></ul></div><div class="nav-group"><h2>Architecture</h2><ul><li><a href="architecture/arweave-integrity-anchoring.html">Arweave Integrity Anchoring</a></li><li><a href="architecture/behavior-comparator.html">Behavior Comparator</a></li><li><a href="architecture/debate-review.html">Debate Review</a></li><li><a href="architecture/denial-escalation-and-clarification.html">Denial Escalation And Clarification</a></li><li><a href="architecture/gap-detection.html">Gap Detection</a></li><li><a href="architecture/policy-precedence.html">Policy Precedence</a></li></ul></div><div class="nav-group"><h2>Audits</h2><ul><li><a href="audits/2026-09-14-security-review.html">2026 09 14 Security Review</a></li></ul></div>
+</div>
+</nav>
+<main>
+<h1 id="nancy-mobiilisovellus--suunnitelma-ja-todo">Nancy-mobiilisovellus — suunnitelma ja TODO</h1>
+<p>Päivitetty: 15.9.2026. Tila: tuotesuunnitelma, ei kuvaus valmiista mobiilitoteutuksesta.</p>
+<h2 id="tavoite">Tavoite</h2>
+<p>Nancy auttaa tekemään työn loppuun sen aikana: käyttäjä antaa tehtävän, ottaa kuvat ja sanelee havainnot. Nancy kohdistaa aineiston oikeaan työhön, kysyy tarvittavat tarkennukset ja tuottaa esimerkiksi raportin tai sähköpostin liitteineen. Omat ohjeet ja työnkulut ovat käyttäjän hallittavissa.</p>
+<p>Sovitut lähtökohdat:</p>
+<ul>
+<li>Mobiilisovellus tukee kuvia, sanelua ja tehtävien hallintaa.</li>
+<li>Paikallisen tekoälyn käyttö on mahdollista. Mallin suorituspaikka pitää erottaa puhelimen käyttöliittymästä.</li>
+<li>Nancyssa ei ole pakollista kuukausiveloitusta. Kertamaksu, lisenssi ja jakelumalli ovat vielä avoimia.</li>
+<li>Paikallisuus kattaa tavoitetilassa myös puheentunnistuksen, puhesynteesin, kuvien tulkinnan ja tehtävien tarkastajan. Mahdollinen pilvikäsittely valitaan erikseen.</li>
+<li>Laitteisto, sähkö, ylläpito ja mahdolliset ulkoiset palvelut voivat aiheuttaa kustannuksia.</li>
+</ul>
+<h2 id="yhteys-nykyiseen-nancyyn">Yhteys nykyiseen Nancyyn</h2>
+<p>Nykyinen projekti on OpenClaw-agentin tehtävävaltuutusta ja toimintaa valvova Nancy SSIL -lisäosa. Mobiilisovellus tarvitsee sen ympärille käyttöliittymän ja luotetun palvelurajapinnan.</p>
+<p>README kuvaa koodin omistaman tehtävävahvistuksen ja suojatut ohjaustiedostot. Mobiilin painikkeita, lomakkeita tai puhetta ei saa vain tulkita agentin itse tuottamaksi hyväksynnäksi. Nykyinen tarkennus- ja estokäyttäytyminen sekä vahvistuksen voimassaolo on tarkistettava toteutuksesta ennen mobiiliprotokollan suunnittelua.</p>
+<ul>
+<li><input disabled="" type="checkbox"> Kartoita nykyinen tehtävä-, vahvistus-, worker- ja ilmoitusrajapinta.</li>
+<li><input disabled="" type="checkbox"> Määrittele palvelurajapinta mobiilille: tehtävät, aineistot, kysymykset, hyväksynnät ja tulokset.</li>
+<li><input disabled="" type="checkbox"> Toteuta käyttäjän vastauksen vastaanotto ja valtuutuksen kirjaaminen luotetussa koodissa.</li>
+<li><input disabled="" type="checkbox"> Suunnittele ohjemuutoksille erillinen hallintareitti, joka säilyttää nykyisten suojattujen tiedostojen suojauksen.</li>
+</ul>
+<h2 id="ensimmäinen-käyttötapaus-korjaamon-työ">Ensimmäinen käyttötapaus: korjaamon työ</h2>
+<ol>
+<li>Korjaaja valitsee tai luo työn, esimerkiksi työmääräys 1234.</li>
+<li>Hän ottaa kuvat ja sanelee: ”Etujarrut kuluneet. Tee asiakkaalle korjauslupapyyntö.”</li>
+<li>Nancy näyttää ymmärtämänsä tehtävän ja kysyy puuttuvat tiedot.</li>
+<li>Nancy muodostaa sähköpostin ja liitteet.</li>
+<li>Korjaaja tarkistaa vastaanottajan, sisällön ja kuvat sekä hyväksyy lähetyksen.</li>
+<li>Viesti, kuvat ja lopputulos löytyvät työn historiasta. Epäonnistunut lähetys jää näkyvästi odottamaan toimenpidettä.</li>
+</ol>
+<p>Ensimmäisessä kokeilussa työ ja vastaanottaja voidaan syöttää käsin. Korjaamojärjestelmän integraatio on erillinen työ.</p>
+<h2 id="p0--ensimmäinen-toimiva-kokonaisuus">P0 — ensimmäinen toimiva kokonaisuus</h2>
+<h3 id="yhteys-ja-käyttöönotto">Yhteys ja käyttöönotto</h3>
+<ul>
+<li><input disabled="" type="checkbox"> Valitse ensimmäinen alusta: Android, iOS tai molemmat.</li>
+<li><input disabled="" type="checkbox"> Valitse toteutustekniikka ja määrittele kameran, mikrofonin ja taustatoimintojen tarpeet.</li>
+<li><input disabled="" type="checkbox"> Toteuta puhelimen paritus oman Nancy-palvelimen kanssa sekä laitteen käyttöoikeuden peruminen.</li>
+<li><input disabled="" type="checkbox"> Näytä palvelimen tavoitettavuus ja tekoälyn suorituspaikka ymmärrettävästi.</li>
+<li><input disabled="" type="checkbox"> Toteuta yhteys omassa lähiverkossa; ratkaise etäkäyttö erikseen.</li>
+<li><input disabled="" type="checkbox"> Dokumentoi käyttöönotto ilman pakollista Nancy-pilvitiliä tai kuukausitilausta.</li>
+</ul>
+<h3 id="tehtävä-ja-aktiivinen-työ">Tehtävä ja aktiivinen työ</h3>
+<ul>
+<li><input disabled="" type="checkbox"> Uusi tehtävä tekstillä tai sanelulla.</li>
+<li><input disabled="" type="checkbox"> Työn/kohteen luonti ja valinta: tunniste, nimi ja tarvittaessa asiakas.</li>
+<li><input disabled="" type="checkbox"> Aktiivinen työ näkyy kamera-, sanelu- ja keskustelunäkymissä.</li>
+<li><input disabled="" type="checkbox"> Työn vaihtaminen vaihtaa seuraavien havaintojen kohteen selkeästi.</li>
+<li><input disabled="" type="checkbox"> Epäselvä kohdistus kysytään käyttäjältä.</li>
+<li><input disabled="" type="checkbox"> Väärään työhön tallennetun havainnon voi siirtää jälkikäteen.</li>
+<li><input disabled="" type="checkbox"> Tehtävän tilat: luonnos, odottaa vahvistusta, käynnissä, odottaa vastausta, valmis, epäonnistunut ja peruttu.</li>
+<li><input disabled="" type="checkbox"> Käyttäjä voi keskeyttää tehtävän; jo tehdyt ulkoiset toimet jäävät historiaan.</li>
+</ul>
+<h3 id="kuvat-ja-sanelu">Kuvat ja sanelu</h3>
+<ul>
+<li><input disabled="" type="checkbox"> Ota yksi tai useita kuvia ja tuo kuvia puhelimesta.</li>
+<li><input disabled="" type="checkbox"> Näytä liitteet ennen niiden käyttämistä raportissa tai viestissä.</li>
+<li><input disabled="" type="checkbox"> Nauhoita sanelu ja litteroi se paikallisesti suomeksi.</li>
+<li><input disabled="" type="checkbox"> Anna käyttäjän korjata litterointi ja erityisesti nimet, rekisteritunnukset, summat ja työmääräykset.</li>
+<li><input disabled="" type="checkbox"> Liitä alkuperäinen kuva, havainto ja aikaleima samaan työhön.</li>
+<li><input disabled="" type="checkbox"> Tallenna keskeneräinen aineisto laitteen paikalliseen jonoon verkkokatkon ajaksi.</li>
+<li><input disabled="" type="checkbox"> Toteuta siirron uudelleenyritys ilman kuvien tai havaintojen monistumista.</li>
+<li><input disabled="" type="checkbox"> Päätä säilytetäänkö alkuperäinen ääni ja miten käyttäjä poistaa sen.</li>
+</ul>
+<h3 id="tehtävän-ymmärtäminen-ja-toimintavaltuudet">Tehtävän ymmärtäminen ja toimintavaltuudet</h3>
+<p>Tehtävän hyväksyntä ja kysymisen käytäntö ovat kaksi eri valintaa.</p>
+<ul>
+<li><input disabled="" type="checkbox"> Näytä lyhyt suunnitelma: tavoite, käytettävä aineisto ja aiotut ulkoiset toimet.</li>
+<li><input disabled="" type="checkbox"> <strong>Mennään tällä:</strong> hyväksyy näkyvän suunnitelman sovituilla rajoilla.</li>
+<li><input disabled="" type="checkbox"> <strong>Tarkenna:</strong> antaa muokata tehtävää tai pyytää Nancyltä täsmentävät kysymykset.</li>
+<li><input disabled="" type="checkbox"> <strong>Kysele ennen rahan käyttöä:</strong> maksu tai sitova tilaus pysähtyy hyväksyntään.</li>
+<li><input disabled="" type="checkbox"> <strong>Kysele aina kun tarpeen:</strong> olennainen epäselvyys pysäyttää työn tarkennukseen.</li>
+<li><input disabled="" type="checkbox"> Määrittele valintojen yhteiskäyttö. Rahankäytön hyväksyntä ei poista muun olennaisen tarkennuksen tarvetta.</li>
+<li><input disabled="" type="checkbox"> Näytä ensimmäisessä versiossa sähköpostin lähetys erillisenä hyväksyttävänä toimena.</li>
+<li><input disabled="" type="checkbox"> Sido hyväksyntä tehtävään ja tarkkaan sisältöversioon. Vastaanottajan, liitteiden tai hinnan muutos mitätöi vanhan hyväksynnän.</li>
+<li><input disabled="" type="checkbox"> Estä vanhan vastauksen, toisen tehtävän vastauksen ja toistetun verkkopyynnön käyttö uutena lupana.</li>
+</ul>
+<h3 id="kysymykset-ja-lomakkeet">Kysymykset ja lomakkeet</h3>
+<ul>
+<li><input disabled="" type="checkbox"> Tue yksittäistä kysymystä, valintapainikkeita ja tehtävään generoitua lyhyttä lomaketta.</li>
+<li><input disabled="" type="checkbox"> Esitäytetyt tunnetut tiedot ovat näkyvissä ja korjattavissa.</li>
+<li><input disabled="" type="checkbox"> Tue tekstiä, valintoja, numeroita ja liitepyyntöä; merkitse pakolliset tiedot.</li>
+<li><input disabled="" type="checkbox"> Muodosta lomake rajatusta, validoidusta rakenteesta, jonka sovellus renderöi.</li>
+<li><input disabled="" type="checkbox"> Näytä miksi vastausta tarvitaan ja mitä hyväksynnästä seuraa.</li>
+<li><input disabled="" type="checkbox"> Säilytä vastaamaton kysymys sovelluksen sulkemisen ja yhteyskatkon yli.</li>
+</ul>
+<h3 id="ensimmäinen-valmis-työnkulku-ja-tulos">Ensimmäinen valmis työnkulku ja tulos</h3>
+<ul>
+<li><input disabled="" type="checkbox"> Toteuta <strong>Pyydä korjauslupa</strong> -pohja: työ, vastaanottaja, kuvat, havainto ja tarvittaessa hinta.</li>
+<li><input disabled="" type="checkbox"> Muodosta muokattava sähköpostiluonnos ja näytä kaikki liitteet.</li>
+<li><input disabled="" type="checkbox"> Toteuta yksi sähköpostiyhteys käyttäjän omalle tilille; valitse palvelu pilotin perusteella.</li>
+<li><input disabled="" type="checkbox"> Kirjaa lähetyksen kuittaus ja virhetilanne. Älä merkitse lähetetyksi pelkän agentin ilmoituksen perusteella.</li>
+<li><input disabled="" type="checkbox"> Selvitä epävarma lähetyksen tila ennen uudelleenlähetystä, jotta asiakas ei saa kaksoisviestiä.</li>
+<li><input disabled="" type="checkbox"> Näytä työn aikajanalla havainnot, kysymykset, hyväksynnät ja lopputulos.</li>
+</ul>
+<h2 id="p1--puheella-jatkuva-työ-ja-omat-työnkulut">P1 — puheella jatkuva työ ja omat työnkulut</h2>
+<h3 id="kaksisuuntainen-puhe">Kaksisuuntainen puhe</h3>
+<ul>
+<li><input disabled="" type="checkbox"> Nancy lukee kysymyksen ääneen ja vastaanottaa puhutun vastauksen samaan tehtävään.</li>
+<li><input disabled="" type="checkbox"> Puheella ja lomakkeella vastaaminen päivittävät samaa odottavaa päätöstä.</li>
+<li><input disabled="" type="checkbox"> Tuki komennoille ”lue ensin”, ”muuta”, ”hyväksy”, ”peru” ja ”kysy myöhemmin”.</li>
+<li><input disabled="" type="checkbox"> Epäselvä puhe, taustaääni tai toisen henkilön puhe ei tuota hyväksyntää.</li>
+<li><input disabled="" type="checkbox"> Ennen hyväksyntää luetaan päätöksen olennaiset tiedot, kuten vastaanottaja ja summa.</li>
+<li><input disabled="" type="checkbox"> Autoiluun sopiva käyttö: yksi lyhyt kysymys kerrallaan ja mahdollisuus siirtää tarkastus myöhemmäksi.</li>
+<li><input disabled="" type="checkbox"> Kuvien tai pitkän sisällön tarkastusta vaativa päätös voi odottaa pysähdystä.</li>
+<li><input disabled="" type="checkbox"> Selvitä Bluetooth-kuulokkeet, käyttö lukitulla näytöllä ja käyttöjärjestelmien taustarajoitukset.</li>
+</ul>
+<h3 id="työnkulkujen-luonti-ja-ylläpito">Työnkulkujen luonti ja ylläpito</h3>
+<ul>
+<li><input disabled="" type="checkbox"> Valmiiden pohjien kirjasto: huoltokäynti, vikahavainto, korjauslupa ja työn valmistuminen.</li>
+<li><input disabled="" type="checkbox"> ”Muokkaa tästä oma” ja ”Luo puhumalla tai kirjoittamalla”.</li>
+<li><input disabled="" type="checkbox"> Työnkululla on nimi, tarvittavat tiedot, vaiheet, tulospohja ja ulkoiset toimet.</li>
+<li><input disabled="" type="checkbox"> Esikatselu ja kokeilu esimerkkiaineistolla ennen käyttöönottoa.</li>
+<li><input disabled="" type="checkbox"> Erota yhden työn poikkeus pysyvästä muutoksesta.</li>
+<li><input disabled="" type="checkbox"> Ohjeiden ja työnkulkujen versiohistoria, muutosvertailu ja palautus.</li>
+<li><input disabled="" type="checkbox"> Käynnissä oleva työ säilyttää käyttämänsä version; päivitys ei vaihda sitä huomaamatta.</li>
+<li><input disabled="" type="checkbox"> Omien ja yhteisten pohjien erottelu; yhteisen muutoksen hyväksyy siihen oikeutettu käyttäjä.</li>
+<li><input disabled="" type="checkbox"> Määrittele tallennusmuoto ja ohjeiden, työnkulkujen sekä pohjien tuonti ja vienti.</li>
+</ul>
+<h2 id="p2--laajennukset">P2 — laajennukset</h2>
+<ul>
+<li><input disabled="" type="checkbox"> Korjaamo- tai asiakashallintajärjestelmän yhteys: työmääräykset ja yhteystiedot.</li>
+<li><input disabled="" type="checkbox"> Asiakkaan vastauksen liittäminen työhön ja korjausluvan tilan seuranta.</li>
+<li><input disabled="" type="checkbox"> Tiimin käyttäjät, vastuuhenkilöt ja yhteiset kohteet.</li>
+<li><input disabled="" type="checkbox"> Ajastetut tehtävät ja ilmoitukset vain merkityksellisistä muutoksista.</li>
+<li><input disabled="" type="checkbox"> PDF-raportit, lisätulospohjat ja muut palveluyhteydet.</li>
+<li><input disabled="" type="checkbox"> Puhelimessa suoritettava tekoäly ja laajempi käyttö ilman verkkoyhteyttä.</li>
+<li><input disabled="" type="checkbox"> Valinnainen pilvimalli käyttäjän omilla tunnuksilla; aineiston siirtyminen näkyy ennen käyttöönottoa.</li>
+</ul>
+<h2 id="ehdotus-ensimmäisen-version-rajaukseksi">Ehdotus ensimmäisen version rajaukseksi</h2>
+<p>Tämä on ehdotus, ei vielä päätetty arkkitehtuuri:</p>
+<ul>
+<li>Puhelin toimii käyttöliittymänä ja oma tietokone/palvelin suorittaa paikalliset mallit.</li>
+<li>Yksi käyttäjä, yksi palvelin, yksi korjaamotyönkulku ja yksi sähköpostiyhteys.</li>
+<li>Kuvat, suomenkielinen sanelu, tarkennuslomake ja näkyvä lähetyksen hyväksyntä.</li>
+<li>Yhteyskatkossa kuvat ja sanelut säilyvät jonossa. Mallityö ja lähettäminen jatkuvat yhteyden palattua.</li>
+<li>Kaksisuuntainen puhe seuraa ensimmäisen toimivan ketjun jälkeen. Se kuuluu tuotteen tavoitteeseen, vaikka ei ensimmäiseen väliversioon.</li>
+</ul>
+<h2 id="avoimet-päätökset">Avoimet päätökset</h2>
+<ul>
+<li><input disabled="" type="checkbox"> Android vai iOS ensin, vai yhteinen toteutus molemmille?</li>
+<li><input disabled="" type="checkbox"> Missä ensimmäisen käyttäjän Nancy-palvelin toimii ja miten puhelin yhdistetään siihen kodin/työpaikan ulkopuolelta?</li>
+<li><input disabled="" type="checkbox"> Mitkä paikalliset mallit hoitavat agentin, tarkastajan, kuvat, puheentunnistuksen ja puhesynteesin? Mitkä ovat laitevaatimukset?</li>
+<li><input disabled="" type="checkbox"> Mikä sähköpostipalvelu ja mikä oikea käyttäjä valitaan pilottiin?</li>
+<li><input disabled="" type="checkbox"> Miten sovellus hankitaan ilman kuukausimaksua ja miten päivitykset sekä ylläpito rahoitetaan?</li>
+<li><input disabled="" type="checkbox"> Kuinka kauan kuvat, äänet ja tehtävähistoria säilytetään? Miten vienti, poisto ja varmuuskopiointi toimivat?</li>
+<li><input disabled="" type="checkbox"> Mitkä hyväksynnät voi antaa äänellä ja milloin vaaditaan laitteen lukituksen avaaminen?</li>
+<li><input disabled="" type="checkbox"> Mitkä nykyisen Nancyn estot ja tarkennukset voidaan näyttää mobiilissa jatkettavana kysymyksenä?</li>
+</ul>
+<h2 id="hyväksymiskriteerit-ja-pilotin-mittarit">Hyväksymiskriteerit ja pilotin mittarit</h2>
+<ul>
+<li><input disabled="" type="checkbox"> Käyttäjä suorittaa korjaamoketjun puhelimella: työ → kuvat ja sanelu → tarkennus → luonnos → hyväksyntä → lähetyskuittaus.</li>
+<li><input disabled="" type="checkbox"> Kuvia tai hyväksyntöjä ei siirry väärään työhön kahden samanaikaisen tehtävän testissä.</li>
+<li><input disabled="" type="checkbox"> Lähetyksen sisällön muuttaminen vaatii uuden hyväksynnän.</li>
+<li><input disabled="" type="checkbox"> Verkkokatko, sovelluksen uudelleenkäynnistys ja palvelimen häiriö eivät kadota hyväksyttyä aineistoa tai aiheuta kaksoislähetyksiä.</li>
+<li><input disabled="" type="checkbox"> Paikallisessa tilassa mallikutsut, kuvat ja ääni pysyvät määritellyssä omassa ympäristössä; tämä tarkistetaan verkkoliikenteestä.</li>
+<li><input disabled="" type="checkbox"> Mitataan sanelun korjaustarve, tehtävän valmistumisaika, kysymysten määrä ja käyttäjän tekemät korjaukset oikeissa töissä.</li>
+<li><input disabled="" type="checkbox"> Verrataan samaa työtehtävää nykyiseen käsityöhön ja käytettävissä olevaan yleisagenttiin. Määritellään tavoitetasot pilotin lähtömittauksen jälkeen.</li>
+</ul>
+<h2 id="seuraavat-konkreettiset-työt">Seuraavat konkreettiset työt</h2>
+<ol>
+<li>Valitse pilottikäyttäjä, puhelinalusta ja oma palvelin.</li>
+<li>Piirrä näkymät: työt, aktiivinen työ, kuva/sanelu, kysymys ja lähetyksen tarkistus.</li>
+<li>Määrittele mobiilin ja nykyisen Nancyn tehtävä- ja hyväksyntäprotokolla.</li>
+<li>Toteuta yksi toimiva ketju paikallisella tekoälyllä.</li>
+<li>Testaa aidossa työtilanteessa ja lisää kaksisuuntainen puhe havaintojen perusteella.</li>
+</ol>
+
+<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit 0f4d482. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
+</main>
+</div>
+</body>
+</html>
