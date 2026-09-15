@@ -5,7 +5,7 @@ import { isWritable, createProtectedPathsResolver, DEFAULT_AGENT_ID } from "./po
 import { resolveSecretInputBestEffort, resolveMainAgentModelRef } from "./config.ts";
 import type { NancyConfig } from "./config.ts";
 import { createTelegramNotifier } from "./notifications/telegram.ts";
-import type { ConfirmedTask } from "./confirmation/tasks.ts";
+import type { ConfirmedTask, TaskAuthorization, PendingConfirmations } from "./confirmation/tasks.ts";
 import { createTaskAuthorization, createPendingConfirmations, buildUnconfirmedInfoLookupTask, buildUnconfirmedChatReplyTask } from "./confirmation/tasks.ts";
 import type { SubagentRuntime } from "./workers/worker-manager.ts";
 import { createWorkerManager } from "./workers/worker-manager.ts";
@@ -27,14 +27,85 @@ import {
 } from "./policy/tool-policy.ts";
 import { createDenialRecorder } from "./policy/denial-policy.ts";
 import { createSessionState, UNKNOWN_SESSION_KEY } from "./state.ts";
+import type { SessionState } from "./state.ts";
 import { createOperatorPolicy } from "./policy/operator-policy.ts";
 import { buildDefaultIntegritySources, createIntegrityAnchorService } from "./integrity/arweave-anchor.ts";
+import type { TelegramNotifier } from "./notifications/telegram.ts";
+
+// Module-level singletons, keyed by api.rootDir (the plugin's own resolved
+// directory — the same physical plugin install shares one key; two
+// unrelated installs, or two independent test fixtures, never collide).
+// OpenClaw can invoke a plugin's register(api) more than once for the SAME
+// loaded module — confirmed directly (a per-instance id + monotonic
+// call-sequence counter on createTaskAuthorization() showed two live
+// instances within one Gateway process, despite exactly one call site in
+// source and exactly one plugin load in config; see
+// docs/architecture/behavior-comparator.md's "Known limitations"). Handlers
+// registered from a LATER register() call were reading/writing a
+// completely disconnected copy of session/task state from handlers
+// registered by an EARLIER call — e.g. a task granted via message_received
+// (one call's closure) was invisible to the very next before_tool_call
+// check in the same session (a different call's closure).
+//
+// Every api.on(...) registration still has to happen on every register()
+// call (each call may wire up a different underlying hook dispatcher), but
+// the STATE those handlers close over must not be recreated each time.
+// Anything here is either read/written from more than one hook category
+// (message_* vs before_tool_call/after_tool_call) or, for the integrity
+// anchor, owns its own timer/in-flight-publish state where a second live
+// instance would mean two independent periodic timers and a real risk of
+// double-submitting to Arweave.
+//
+// Keying by rootDir rather than a single bare module-level binding matters
+// for tests, not just correctness in production: test/helpers.ts's
+// createFakeApi() gives every test its own fresh mkdtempSync rootDir
+// specifically so tests don't leak state into one another — a single bare
+// `let`, shared for the lifetime of the whole test-runner process
+// regardless of rootDir, reintroduced exactly that leakage (confirmed by a
+// real test failure: a later test saw an earlier test's denial history).
+// Rekeying on rootDir keeps production's "same plugin install, N
+// register() calls, one shared state" guarantee while still giving two
+// different installs — or two different tests — two different states.
+function getOrCreateShared<T>(map: Map<string, T>, key: string, factory: () => T): T {
+  let value = map.get(key);
+  if (!value) {
+    value = factory();
+    map.set(key, value);
+  }
+  return value;
+}
+const sharedTaskAuthByRoot = new Map<string, TaskAuthorization>();
+const sharedSessionStateByRoot = new Map<string, SessionState>();
+const sharedConfirmationsByRoot = new Map<string, PendingConfirmations>();
+const sharedNotifierByRoot = new Map<string, TelegramNotifier>();
+const sharedIntegrityAnchoringByRoot = new Map<string, ReturnType<typeof createIntegrityAnchorService>>();
+
+// Test-only: a real Gateway process has exactly one rootDir for the
+// lifetime of the process, so the maps above never need pruning in
+// production. Node's test runner instead loads this module once and reuses
+// it across every test file's register() calls, each with its own unique
+// mkdtempSync rootDir — without a way to drop old entries, every test's
+// full plugin state (including retained history/timers) stays referenced
+// for the rest of the run, which is what turned a ~13s suite into a ~110s
+// one. test/helpers.ts's createFakeApi() cleanup() calls this so each
+// test's rootDir entry is dropped once that test is done with it.
+export function __clearSharedStateForTests(rootDir: string): void {
+  sharedTaskAuthByRoot.delete(rootDir);
+  sharedSessionStateByRoot.delete(rootDir);
+  sharedConfirmationsByRoot.delete(rootDir);
+  sharedNotifierByRoot.delete(rootDir);
+  sharedIntegrityAnchoringByRoot.delete(rootDir);
+}
 
 export default definePluginEntry({
   id: "nancy",
   name: "NanCy",
   description: "SSIL – Stateless Security Intent Layer",
   register(api) {
+    // See the sharedTaskAuthByRoot comment above: the key that makes the
+    // module-level singleton maps below behave as "shared within one
+    // plugin install, isolated across different ones."
+    const rootKey = api.rootDir ?? ".";
     const logFile = join(api.rootDir ?? ".", "nancy.log");
     const analysisLog = join(api.rootDir ?? ".", "nancy-analysis.log");
     const snapshotsDir = join(api.rootDir ?? ".", "snapshots");
@@ -60,7 +131,7 @@ export default definePluginEntry({
     if (nancyConfig.workerAgentId && nancyConfig.workerAgentId !== DEFAULT_AGENT_ID) {
       integrityWorkspaces.push({ name: "worker", paths: getAgentPaths(nancyConfig.workerAgentId) });
     }
-    const integrityAnchoring = createIntegrityAnchorService({
+    const integrityAnchoring = getOrCreateShared(sharedIntegrityAnchoringByRoot, rootKey, () => createIntegrityAnchorService({
       config: nancyConfig.arweaveAnchoring,
       rootDir: api.rootDir ?? ".",
       sources: () => buildDefaultIntegritySources(
@@ -68,14 +139,16 @@ export default definePluginEntry({
         integrityWorkspaces,
         nancyConfig.arweaveAnchoring?.includeTaskRecords !== false,
       ),
-    });
+    }));
 
     // Per-session confirmed-task authorization (see confirmation/tasks.ts).
-    const taskAuth = createTaskAuthorization();
+    // Module-level singleton, shared across every register() call for this
+    // same plugin install — see the comment above sharedTaskAuthByRoot.
+    const taskAuth = getOrCreateShared(sharedTaskAuthByRoot, rootKey, createTaskAuthorization);
     const { getCurrentTask } = taskAuth;
 
     // Telegram alerting/status pushes (see notifications/telegram.ts).
-    const notifier = createTelegramNotifier(api, nancyConfig);
+    const notifier = getOrCreateShared(sharedNotifierByRoot, rootKey, () => createTelegramNotifier(api, nancyConfig));
 
     function getSubagentRuntime(): SubagentRuntime {
       return (api.runtime as unknown as { subagent: SubagentRuntime }).subagent;
@@ -91,7 +164,8 @@ export default definePluginEntry({
 
     // Per-session state for the main/worker split, behavioral review, cron
     // correlation, and recent call/reasoning history (see state.ts).
-    const state = createSessionState();
+    // Module-level singleton — see the comment on sharedTaskAuth above.
+    const state = getOrCreateShared(sharedSessionStateByRoot, rootKey, createSessionState);
 
     // Worker session spawn/wait/cleanup (see workers/worker-manager.ts).
     const { spawnWorkerForTask } = createWorkerManager({
@@ -648,7 +722,8 @@ Use BLOCK when the message contains data or requests that were not authorized by
     });
 
     // Confirmation requests awaiting a y/n reply (see confirmation/tasks.ts).
-    const confirmations = createPendingConfirmations();
+    // Module-level singleton — see the comment on sharedTaskAuth above.
+    const confirmations = getOrCreateShared(sharedConfirmationsByRoot, rootKey, createPendingConfirmations);
 
     // Without this, the per-session state in state.ts/confirmation/tasks.ts
     // would grow one entry per sessionKey forever on a long-running gateway

@@ -4,6 +4,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { __clearSharedStateForTests } from "../src/index.ts";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyFn = (...args: any[]) => any;
@@ -22,8 +23,14 @@ export type FakeApi = {
 export function createFakeApi(opts: {
   pluginConfig?: Record<string, unknown>;
   subagent?: Record<string, AnyFn>;
+  // Reuse an existing directory instead of minting a fresh mkdtempSync one —
+  // for tests that need two independent FakeApi/handlers pairs (e.g. two
+  // separate register() calls) to behave like the SAME plugin install, since
+  // src/index.ts's module-level shared state is keyed by api.rootDir. Omit
+  // for the normal case of one isolated rootDir per test.
+  rootDir?: string;
 } = {}): { api: FakeApi; handlers: Record<string, AnyFn>; hookOptions: Record<string, { timeoutMs?: number } | undefined>; rootDir: string; cleanup: () => void } {
-  const rootDir = mkdtempSync(join(tmpdir(), "nancy-test-"));
+  const rootDir = opts.rootDir ?? mkdtempSync(join(tmpdir(), "nancy-test-"));
   const handlers: Record<string, AnyFn> = {};
   const hookOptions: Record<string, { timeoutMs?: number } | undefined> = {};
   const api: FakeApi = {
@@ -47,7 +54,13 @@ export function createFakeApi(opts: {
       hookOptions[event] = hookOpts;
     },
   };
-  return { api, handlers, hookOptions, rootDir, cleanup: () => rmSync(rootDir, { recursive: true, force: true }) };
+  return {
+    api, handlers, hookOptions, rootDir,
+    cleanup: () => {
+      __clearSharedStateForTests(rootDir);
+      rmSync(rootDir, { recursive: true, force: true });
+    },
+  };
 }
 
 // Polls a real timer (mocks here resolve immediately, so this settles fast)
