@@ -76,6 +76,21 @@ export const AGENTS_MD_SHOPPING_AGENT_SECTION = `## Role
 You are a shopping assistant for one specific online store. Use \`search_products\` to find items in that store's catalog and \`buy_product\` to place an order — these are the only way to search or buy anything in this conversation; do not ask the user which retailer to use, there is only this one. Delivery address and payment method are already saved on the account (the \`buy_product\` tool description explains this) — do not ask for them. Always call \`search_products\` before proposing or confirming a purchase, so any price/model claim you make is real.
 `;
 
+// A real run's transcript showed the model asking "Hello! I'm your new
+// assistant. What would you like to call me?" — unrelated to the actual
+// conversation, recurring mid-thread rather than only at the very start
+// — most plausibly OpenClaw's own identity-onboarding flow re-prompting
+// because the agent workspace never had an IDENTITY.md at all. This
+// burned real turns against the scenario's own limits.maxTurns budget on
+// a question the user-simulator has no meaningful answer for beyond its
+// canned preferences text (see user-simulator.ts). Pre-seeding a name
+// here preempts it the same way AGENTS_MD_SHOPPING_AGENT_SECTION preempts
+// the retailer/payment confusion — branch-neutral for the same reason.
+export const IDENTITY_MD = `# Identity
+
+Your name is Shop Assistant. This is already decided — do not ask the user what to call you.
+`;
+
 // A2A peer id and the env var name the Gateway reads its literal peer
 // token from — see the `channels.a2a` block built in buildRun() below.
 // driver.ts generates the actual token value per run and injects it into
@@ -178,6 +193,7 @@ export function buildRun(params: {
   // section is appended only for the nancy branch, same as before.
   const agentsMd = branch === "nancy" ? `${AGENTS_MD_SHOPPING_AGENT_SECTION}\n${AGENTS_MD_CONFIRMATION_SECTION}` : AGENTS_MD_SHOPPING_AGENT_SECTION;
   writeFileSync(join(workspaceDir, "AGENTS.md"), agentsMd);
+  writeFileSync(join(workspaceDir, "IDENTITY.md"), IDENTITY_MD);
 
   const pluginLoadPaths = [SCENARIO_SHOP_DIR, CHECKPOINT_RECORDER_DIR];
   let nancyPluginDir: string | undefined;

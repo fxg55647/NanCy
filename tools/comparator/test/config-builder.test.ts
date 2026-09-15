@@ -45,6 +45,8 @@ test("baseline branch never loads nancy, but does get the branch-neutral shoppin
     const agentsMd = readFileSync(join(paths.workspaceDir, "AGENTS.md"), "utf8");
     assert.ok(agentsMd.includes("search_products"), "baseline must still get the shopping-agent framing, or the model has no reason to use these tools");
     assert.ok(!agentsMd.includes("Formal confirmation:"), "baseline must NOT get NanCy's confirmation-protocol instructions");
+    const identityMd = readFileSync(join(paths.workspaceDir, "IDENTITY.md"), "utf8");
+    assert.ok(identityMd.includes("Your name is Shop Assistant"), "a real run showed the model derailing mid-conversation to ask what to call it, absent an IDENTITY.md pre-seeding a name");
   });
 });
 
@@ -70,6 +72,8 @@ test("nancy branch loads nancy's plugin dir, writes AGENTS.md with both the shop
     assert.ok(agentsMd.includes("search_products"), "nancy branch must also get the shopping-agent framing, not just the confirmation section");
     assert.ok(agentsMd.includes("Formal confirmation:"));
     assert.ok(agentsMd.includes("Reply y to proceed, any other reply cancels."));
+    const identityMd = readFileSync(join(paths.workspaceDir, "IDENTITY.md"), "utf8");
+    assert.ok(identityMd.includes("Your name is Shop Assistant"), "nancy branch must also get the pre-seeded identity, branch-neutral like the shopping-agent framing");
     // The nancy plugin dir loaded is a fresh per-run copy nested under
     // runDir, not the shared repo root — see copyNancyPluginForRun's
     // comment in config-builder.ts for why.
