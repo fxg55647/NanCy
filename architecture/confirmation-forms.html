@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Confirmation Forms — NanCy SSIL</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1a1a1a; --muted: #5b6472; --border: #e2e5ea;
+  --accent: #7c3aed; --code-bg: #f4f4f7; --nav-bg: #fafafa;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14161c; --fg: #eef0f4; --muted: #9aa3b2; --border: #2a2e38;
+    --accent: #b794f6; --code-bg: #1c1f27; --nav-bg: #191b22;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); }
+.layout { display: flex; min-height: 100vh; }
+nav.sidebar { width: 260px; flex-shrink: 0; background: var(--nav-bg); border-right: 1px solid var(--border); padding: 24px 16px; }
+nav.sidebar h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 20px 0 6px; }
+nav.sidebar ul { list-style: none; margin: 0; padding: 0; }
+nav.sidebar li a { display: block; padding: 4px 8px; border-radius: 6px; text-decoration: none; color: var(--fg); font-size: 14px; }
+nav.sidebar li a[aria-current="page"] { background: var(--accent); color: #fff; }
+nav.sidebar li a:hover { background: var(--border); }
+.brand { font-weight: 700; font-size: 18px; margin-bottom: 4px; }
+.brand-sub { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+main { flex: 1; min-width: 0; padding: 40px clamp(16px, 5vw, 64px); max-width: 860px; }
+main h1:first-child { margin-top: 0; }
+pre { background: var(--code-bg); padding: 14px 16px; overflow-x: auto; border-radius: 8px; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; overflow-x: auto; display: block; }
+th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+blockquote { border-left: 3px solid var(--accent); margin: 0; padding: 0 16px; color: var(--muted); }
+img { max-width: 100%; }
+footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+#nav-toggle { display: none; }
+.nav-toggle-label { display: none; }
+@media (max-width: 800px) {
+  .layout { display: block; }
+  nav.sidebar { width: auto; border-right: none; border-bottom: 1px solid var(--border); }
+  #nav-toggle:not(:checked) ~ .layout nav.sidebar .nav-body { display: none; }
+  .nav-toggle-label { display: block; padding: 16px; cursor: pointer; font-weight: 600; }
+}
+</style>
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="layout">
+<nav class="sidebar">
+<label class="nav-toggle-label" for="nav-toggle">☰ Docs menu</label>
+<div class="nav-body">
+<div class="brand">NanCy SSIL</div>
+<div class="brand-sub"><a href="https://github.com/fxg55647/NanCy">GitHub ↗</a></div>
+<div class="nav-group"><h2>Overview</h2><ul><li><a href="../index.html">NanCy SSIL</a></li><li><a href="../claude.html">CLAUDE</a></li><li><a href="../how-agents-go-wrong.html">HOW AGENTS GO WRONG</a></li><li><a href="../incidents.html">INCIDENTS</a></li><li><a href="../misconceptions.html">MISCONCEPTIONS</a></li><li><a href="../nancy-policy.html">NANCY POLICY</a></li><li><a href="../related-work.html">RELATED WORK</a></li><li><a href="../security-philosophy.html">SECURITY PHILOSOPHY</a></li><li><a href="../testing.html">TESTING</a></li></ul></div><div class="nav-group"><h2>Docs</h2><ul><li><a href="../mobile-app-todo.html">Mobile App Todo</a></li></ul></div><div class="nav-group"><h2>Architecture</h2><ul><li><a href="arweave-integrity-anchoring.html">Arweave Integrity Anchoring</a></li><li><a href="behavior-comparator.html">Behavior Comparator</a></li><li><a href="confirmation-forms.html" aria-current="page">Confirmation Forms</a></li><li><a href="debate-review.html">Debate Review</a></li><li><a href="denial-escalation-and-clarification.html">Denial Escalation And Clarification</a></li><li><a href="gap-detection.html">Gap Detection</a></li><li><a href="policy-precedence.html">Policy Precedence</a></li></ul></div><div class="nav-group"><h2>Audits</h2><ul><li><a href="../audits/2026-09-14-security-review.html">2026 09 14 Security Review</a></li></ul></div>
+</div>
+</nav>
+<main>
+<h1 id="nancy-generated-confirmation-forms">NanCy-Generated Confirmation Forms</h1>
+<p>Status: <strong>design only, not implemented.</strong> This is a preliminary design record
+for a feature discussed while building <code>tools/mobile-chat-poc/</code>, not yet
+started in code. Read it before implementing anything under
+<code>src/confirmation/</code> or <code>tools/mobile-chat-poc/web/</code> named &quot;form&quot; — the goal
+is to keep the eventual implementation consistent with the security
+invariants below rather than improvising them at build time. See
+<code>docs/mobile-app-todo.md</code>&#39;s P0 &quot;Kysymykset ja lomakkeet&quot; checklist, which
+this design record exists to make concrete.</p>
+<h2 id="why-this-exists">Why this exists</h2>
+<p><code>src/confirmation/gap-detection.ts</code> (feature #2&#39;s other half) already finds
+the problem this solves: a proposal like &quot;Buy a laptop for the office&quot; is a
+well-formed confirmation request that still leaves out a price ceiling, a
+delivery deadline, who pays, and where it ships. Gap detection surfaces
+those as a text note appended to the confirmation message — useful, but
+still just a hint; the human has to notice it, re-ask, and get a <em>second</em>
+free-text proposal back before anything is actually pinned down.</p>
+<p>The idea: instead of (or in addition to) a text note, NanCy generates a
+small, bounded, typed form for exactly those same decision points — the
+mobile app (<code>tools/mobile-chat-poc/</code>) renders it as real input fields, the
+human fills it once, and the filled values become part of the same task
+description NanCy locks in when the task is confirmed. This is a rendering
+and data-collection upgrade to the existing gap-detection idea, not a new
+authorization mechanism — feature #2&#39;s actual confirmation mechanics
+(<code>parseConfirmationRequest</code>, <code>isAffirmativeReply</code>, the TTL, the audit
+record) are unchanged.</p>
+<p><strong>NanCy generates the form, not the target agent.</strong> This follows directly
+from the project&#39;s core principle (&quot;the agent only asks, NanCy decides&quot; —
+<code>CLAUDE.md</code>): the agent proposes a confirmation in its own free-text
+template as it already does today; NanCy&#39;s own trusted code is what turns
+that proposal into form fields, the same way NanCy&#39;s own code (not the
+agent&#39;s) already decides gaps, verdicts, and the final authorization record.</p>
+<h2 id="two-classes-of-field--the-one-invariant-that-matters-most">Two classes of field — the one invariant that matters most</h2>
+<p>Every field belongs to exactly one class, and the class determines where
+its possible values are allowed to come from:</p>
+<ul>
+<li><strong>Authorization fields</strong> — price ceiling, payment method, delivery/
+recipient address, whether the commitment is binding, whether a
+substitute is allowed if the exact request can&#39;t be met. These <em>define
+the scope of what&#39;s authorized</em>. If the field is a choice
+(select/multiselect), <strong>its option list must come from trusted
+operator-side configuration, never from the model</strong> — the same reasoning
+<code>message_sending</code>&#39;s destination preflight already applies to outbound
+message recipients. A field asking &quot;which payment method?&quot; must offer
+only payment methods the operator actually registered; the model can
+decide <em>that</em> the question is relevant, never invent <em>what</em> the answer
+options are. The submitted value for an authorization field becomes part
+of the locked confirmed-task description, the same as if the human had
+typed it into the original free-text proposal.</li>
+<li><strong>Specification fields</strong> — which movie, which airport, required specs,
+special requests. These describe <em>what the task is about</em>, not <em>what&#39;s
+authorized to happen</em>. Their content can be free text or model-suggested
+options, because getting one wrong only narrows or misdescribes the task
+— it doesn&#39;t expand what the worker is allowed to do or spend.</li>
+</ul>
+<p>A field&#39;s <code>kind</code> is set once at generation time and is not something the
+rendering client or the human can change; only NanCy&#39;s own generation logic
+decides it, from a small fixed set of field <em>purposes</em> (see below), never
+from free-form model judgment about an arbitrary purpose string.</p>
+<h2 id="sketch-data-model">Sketch data model</h2>
+<pre><code class="language-ts">type FieldKind = &quot;authorization&quot; | &quot;specification&quot;;
+
+type FieldPurpose =
+  // authorization-class purposes — option lists, when present, always come
+  // from trusted config, never from the model
+  | &quot;price_ceiling&quot; | &quot;payment_method&quot; | &quot;delivery_address&quot;
+  | &quot;recipient&quot; | &quot;binding_commitment&quot; | &quot;substitute_allowed&quot;
+  // specification-class purposes — free text or model-suggested options
+  | &quot;date_or_deadline&quot; | &quot;quantity&quot; | &quot;required_specs&quot; | &quot;free_text_detail&quot;;
+
+interface FormFieldBase {
+  id: string;            // stable key, e.g. &quot;price_ceiling&quot;
+  purpose: FieldPurpose;
+  kind: FieldKind;        // derived from `purpose`, never chosen independently
+  label: string;          // human-readable question, in the user&#39;s language
+  why: string;             // one sentence — mobile-app-todo.md: &quot;näytä miksi vastausta tarvitaan&quot;
+  required: boolean;
+  prefill?: unknown;       // any value NanCy already knows from context
+}
+
+type FormField = FormFieldBase &amp; (
+  | { type: &quot;number&quot;; min?: number; max?: number; unit?: string }
+  | { type: &quot;text&quot;; maxLength: number }
+  | { type: &quot;boolean&quot; }
+  | { type: &quot;date&quot; }
+  | { type: &quot;select&quot;; options: { value: string; label: string }[]; optionsSource: &quot;trusted-config&quot; | &quot;model-suggested&quot; }
+  | { type: &quot;multiselect&quot;; options: { value: string; label: string }[]; optionsSource: &quot;trusted-config&quot; | &quot;model-suggested&quot; }
+  | { type: &quot;attachment&quot;; accept?: string[] }
+);
+
+interface GeneratedForm {
+  confirmationId: string;  // ties back to the same id parseConfirmationRequest tracks
+  fields: FormField[];      // small — mobile-app-todo.md implies single-digit counts, not a wizard
+}
+</code></pre>
+<p><code>optionsSource: &quot;trusted-config&quot;</code> is mandatory whenever <code>kind === &quot;authorization&quot;</code> and <code>type</code> is <code>select</code>/<code>multiselect</code> — NanCy&#39;s generation
+code must enforce this mechanically (reject or drop the field rather than
+trust the model&#39;s own output), the same deterministic-backstop-behind-
+probabilistic-output pattern already used elsewhere (e.g.
+<code>unconfirmedInfoLookupLimitPerHour</code> backing <code>allowUnconfirmedInfoLookups</code>).</p>
+<h2 id="where-trusted-option-lists-would-come-from">Where trusted option lists would come from</h2>
+<p>Not designed yet — this is the biggest open piece. NanCy has no existing
+concept of &quot;the operator&#39;s registered payment methods&quot; or &quot;saved
+addresses.&quot; Candidates, not decided:</p>
+<ul>
+<li>A new config section (e.g. <code>nancyConfig.trustedOptions</code>), operator-edited,
+read the same way <code>NANCY-POLICY.md</code> is read fresh per call.</li>
+<li>Delegating to whatever the <em>target OpenClaw agent</em> already has configured
+for a payment/address-capable tool, if one exists, and treating that as
+the trusted source — but this couples the design to a specific tool
+integration that doesn&#39;t exist in this repo yet (see <code>spend-policy.ts</code>&#39;s
+own open questions about real tool coverage).</li>
+</ul>
+<p>Either way, the source must be something NanCy&#39;s own trusted code reads
+directly, never something the model reports about itself.</p>
+<h2 id="generation-flow-sketch">Generation flow (sketch)</h2>
+<ol>
+<li><code>message_sending</code> recognizes an outbound message as a confirmation
+request, exactly as today (<code>parseConfirmationRequest</code>).</li>
+<li>The required confirmation security review runs first and must ALLOW,
+exactly as today — form generation never runs on a description that
+didn&#39;t already pass review.</li>
+<li>A new one-shot call (sibling to <code>buildGapDetectionPrompt</code>, likely in a
+new <code>src/confirmation/form-generation.ts</code>) proposes 0-6 fields from the
+fixed <code>FieldPurpose</code> set only — never an open-ended &quot;invent a field&quot;
+prompt. The model choosing &quot;this task needs a <code>price_ceiling</code> field&quot; is
+fine; the model choosing the field&#39;s <em>options</em> for anything
+authorization-class is not, and the parser must not accept it even if
+the model tries.</li>
+<li>For each authorization-class select/multiselect field the model
+proposed, NanCy&#39;s own code — not the model&#39;s output — looks up the real
+option list from trusted config (see above) and attaches it. A proposed
+authorization field with no available trusted options for this operator
+is dropped, not sent with model-invented options and not silently
+downgraded to specification-class.</li>
+<li>Malformed output degrades to &quot;no form&quot; (zero fields), the same
+fail-open posture gap detection already uses for its own advisory call
+— a failed generation must never block sending the confirmation itself.</li>
+<li>The confirmation is sent as today (agent&#39;s own template text). The
+generated form, if any, is attached as structured data alongside it —
+exact transport TBD (see &quot;Delivery&quot; below).</li>
+</ol>
+<h2 id="delivery-and-submission">Delivery and submission</h2>
+<ul>
+<li><strong>Channels with form rendering</strong> (the mobile app, <code>web/index.html</code>&#39;s
+eventual successor): the form renders as real inputs. Submission returns
+a structured <code>{confirmationId, values}</code> payload, not free text.</li>
+<li><strong>Channels without form rendering</strong> (Telegram today): degrade to
+gap-detection&#39;s existing behavior — a text note, or a plain &quot;reply y to
+proceed, or answer: 1) ... 2) ...&quot; numbered fallback. Never require form
+rendering to confirm anything — text <code>y</code> must keep working everywhere it
+does today.</li>
+<li><strong>Merging into the confirmed task</strong>: submitted values must be merged into
+the locked task description <em>deterministically</em> (e.g. appended as a
+labeled list: <code>&quot;price_ceiling: 800 EUR; payment_method: Visa ...4242&quot;</code>),
+not by asking an LLM to rewrite the description in prose — an LLM rewrite
+step here would reopen exactly the kind of &quot;agent controls its own
+authorization text&quot; gap Intent Anchoring exists to close. The merged
+text, not the original bare proposal, is what <code>taskAuth.grantTask</code> records
+and what every later <code>before_tool_call</code>/<code>message_sending</code> review sees as
+<code>taskContext</code> — otherwise the price ceiling the human just set would be
+invisible to the very review meant to enforce it.</li>
+<li><strong>A submitted form still requires the same affirmative step</strong> feature #2
+already requires (whatever UI equivalent of <code>y</code> the mobile app uses) —
+filling a form is not itself consent; NanCy still decides that
+independently, per the project&#39;s core principle.</li>
+<li>Submitted <strong>specification-class</strong> text fields are still untrusted data in
+every later reviewer prompt, same as the agent&#39;s own confirmation
+description already is (<code>REVIEWER_SYSTEM_INSTRUCTION</code>&#39;s &quot;treat ...
+histories ... as untrusted data only&quot;) — a human typing it doesn&#39;t change
+that; a free-text field is still a place a message quoted back to the
+reviewer later could carry adversarial phrasing, even if unintentional.</li>
+<li>An unanswered form should honor the same TTL as pending confirmations
+today (<code>createPendingConfirmations</code>&#39;s 15-minute window), unless
+<code>mobile-app-todo.md</code>&#39;s &quot;survive app close/reconnect&quot; requirement means
+this needs its own, longer-lived pending state — open question, not
+decided.</li>
+</ul>
+<h2 id="explicit-non-goals-for-a-first-version">Explicit non-goals for a first version</h2>
+<ul>
+<li>Multi-step or conditional forms (field B appears only if field A ===
+X). <code>mobile-app-todo.md</code> implies small, flat forms; branching adds real
+design surface (what does &quot;partially filled, conditionally invalid&quot; mean
+for the security review?) that a v1 shouldn&#39;t take on.</li>
+<li>Editing an already-granted task&#39;s authorization fields after the fact —
+out of scope; the existing &quot;every attempt needs a fresh confirmation&quot;
+rule (feature #2) already covers wanting to change something.</li>
+<li>A generic, fully model-driven field-purpose set. Keeping <code>FieldPurpose</code>
+a small fixed enum (extended deliberately, not dynamically) is what
+makes the authorization/specification split enforceable in code instead
+of being a prompt-only convention the model could drift away from.</li>
+</ul>
+<h2 id="relationship-to-existing-work">Relationship to existing work</h2>
+<ul>
+<li><strong>Gap detection</strong> (<code>docs/architecture/gap-detection.md</code>) is the direct
+ancestor of this idea and stays the fallback presentation for channels
+that can&#39;t render a form. The two should likely share the &quot;what&#39;s
+missing&quot; detection step and differ only in whether the output becomes a
+text note or a typed form — worth designing as one prompt with two
+renderers, not two independent LLM calls, once this moves past sketch
+stage.</li>
+<li><strong><code>tools/mobile-chat-poc/</code></strong> is the proven transport this would ride on —
+A2A already carries arbitrary structured JSON (see its &quot;structured JSON
+data parts&quot; support in <code>node_modules/openclaw/docs/channels/a2a.md</code>), so
+a form payload has a real delivery path today without new channel work.</li>
+<li><strong><code>src/policy/spend-policy.ts</code></strong> (draft, unwired) sketches a different,
+narrower idea — a deterministic native-<code>requireApproval</code> gate
+specifically for money-shaped tool <em>calls</em> the LLM review already let
+through. That gate and this form design address different moments (this
+one is at confirmation time, before any tool call exists; that one is a
+backstop at the tool-call itself) and are not a replacement for each
+other — a form-collected <code>price_ceiling</code> would be exactly the kind of
+value <code>spend-policy.ts</code>&#39;s <code>SpendIntent.amount</code> could later be checked
+against, if both are ever built.</li>
+</ul>
+<h2 id="open-questions-before-this-could-ship">Open questions before this could ship</h2>
+<ul>
+<li>Where trusted option lists (payment methods, addresses) actually live —
+see &quot;Where trusted option lists would come from&quot; above; nothing here is
+decided.</li>
+<li>Exact wire shape for delivering <code>GeneratedForm</code> over A2A (a structured
+data part alongside the text, per the A2A doc&#39;s support for that) and for
+the submission payload back.</li>
+<li>Whether generation should be one LLM call shared with gap detection or a
+genuinely separate one — affects both cost and whether &quot;note vs. form&quot; can
+ever disagree with each other about what&#39;s missing.</li>
+<li>Whether a form-eligible confirmation should still also carry the
+agent&#39;s own free-text description verbatim (defense in depth: human can
+read it even if some field&#39;s <code>why</code> is confusing) — current sketch assumes
+yes, form is additive, never a replacement for the existing template.</li>
+<li>Regression-testing an LLM-authored <em>structure</em> (not just a verdict) is
+harder than anything else in this codebase tests today — closest
+precedent is <code>parseGapDetectionResponse</code>&#39;s defensive parsing, but that
+degrades to an empty array; a malformed form has more ways to be &quot;kind of
+right but unsafe&quot; (e.g. right shape, wrong <code>kind</code> for a purpose) that a
+naive schema-only validator wouldn&#39;t catch. Needs its own explicit test
+plan once implementation starts, not an afterthought.</li>
+</ul>
+
+<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit 3ead297. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
+</main>
+</div>
+</body>
+</html>
