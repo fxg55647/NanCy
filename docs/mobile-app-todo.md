@@ -86,6 +86,7 @@ Tehtävän hyväksyntä ja kysymisen käytäntö ovat kaksi eri valintaa.
 
 ### Kysymykset ja lomakkeet
 
+- [x] Alustava suunnitteludokumentti (ei vielä toteutettu): [`docs/architecture/confirmation-forms.md`](../docs/architecture/confirmation-forms.md) — Nancy (ei agentti) generoi lomakkeen suoraan gap-detectionin päälle; keskeinen periaate on valtuutusta rajaavien kenttien (hinta, maksutapa, osoite) ja tehtävää täsmentävien kenttien erottelu, jossa vain jälkimmäisten vaihtoehdot saavat tulla mallilta.
 - [ ] Tue yksittäistä kysymystä, valintapainikkeita ja tehtävään generoitua lyhyttä lomaketta.
 - [ ] Esitäytetyt tunnetut tiedot ovat näkyvissä ja korjattavissa.
 - [ ] Tue tekstiä, valintoja, numeroita ja liitepyyntöä; merkitse pakolliset tiedot.
