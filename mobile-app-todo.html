@@ -76,7 +76,7 @@ footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border
 <p>README kuvaa koodin omistaman tehtävävahvistuksen ja suojatut ohjaustiedostot. Mobiilin painikkeita, lomakkeita tai puhetta ei saa vain tulkita agentin itse tuottamaksi hyväksynnäksi. Nykyinen tarkennus- ja estokäyttäytyminen sekä vahvistuksen voimassaolo on tarkistettava toteutuksesta ennen mobiiliprotokollan suunnittelua.</p>
 <ul>
 <li><input disabled="" type="checkbox"> Kartoita nykyinen tehtävä-, vahvistus-, worker- ja ilmoitusrajapinta.</li>
-<li><input checked="" disabled="" type="checkbox"> Ensimmäinen kuljetuskerros-POC: <code>tools/mobile-chat-poc/</code> valjastaa OpenClaw&#39;n valmiin A2A-kanavan (ei uutta liitännäiskoodia) pelkkään tekstichattiin — testattu oikeasti eristettyä Gatewayta ja oikeaa puhelinta vasten. Löysi ja korjasi kaksi todellista Nancy-bugia (ks. <code>CLAUDE.md</code>:n &quot;Recent focus&quot;). Yksi asia vielä todistamatta suoraan, ks. sen README:n &quot;What&#39;s genuinely unverified&quot;.</li>
+<li><input checked="" disabled="" type="checkbox"> Ensimmäinen kuljetuskerros-POC: <code>tools/mobile-chat-poc/</code> valjastaa OpenClaw&#39;n valmiin A2A-kanavan (ei uutta liitännäiskoodia) pelkkään tekstichattiin — koko vahvistuskulku (<code>blocked_no_confirmed_task</code> → vahvistuspyyntö → &quot;y&quot; → <code>confirmation_granted</code> → seuraava toimenpide näkee tehtävän ja saa oikean reviewer-verdiktin) todistettu toimivaksi päästä päähän oikeaa mallia vasten. Matkalla löytyi ja korjattiin kuusi todellista Nancy/tooling-bugia, ks. sen README:n &quot;What broke&quot; ja <code>CLAUDE.md</code>:n &quot;Recent focus&quot;.</li>
 <li><input disabled="" type="checkbox"> Määrittele palvelurajapinta mobiilille: tehtävät, aineistot, kysymykset, hyväksynnät ja tulokset.</li>
 <li><input disabled="" type="checkbox"> Toteuta käyttäjän vastauksen vastaanotto ja valtuutuksen kirjaaminen luotetussa koodissa.</li>
 <li><input disabled="" type="checkbox"> Suunnittele ohjemuutoksille erillinen hallintareitti, joka säilyttää nykyisten suojattujen tiedostojen suojauksen.</li>
@@ -227,7 +227,7 @@ footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border
 <li>Testaa aidossa työtilanteessa ja lisää kaksisuuntainen puhe havaintojen perusteella.</li>
 </ol>
 
-<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit 65ebba1. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
+<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit 9d757fa. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
 </main>
 </div>
 </body>
