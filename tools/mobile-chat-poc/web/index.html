@@ -159,6 +159,73 @@
     font-weight: 600;
   }
   button:disabled { opacity: 0.5; }
+  .form-card {
+    align-self: flex-start;
+    max-width: 82%;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 12px;
+    display: grid;
+    gap: 8px;
+    font-size: 13px;
+  }
+  .form-card .field label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 2px;
+  }
+  .form-card .field .why {
+    color: var(--muted);
+    font-size: 12px;
+    margin-bottom: 4px;
+  }
+  .form-card .field input[type="text"],
+  .form-card .field input[type="number"] {
+    width: 100%;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+  }
+  .form-card .range-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .form-card .range-row input { flex: 1; min-width: 0; }
+  .form-card button.submit-form {
+    justify-self: start;
+    padding: 6px 14px;
+    border-radius: 14px;
+    border: none;
+    background: var(--you-bubble);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .form-card.submitted { opacity: 0.6; }
+  .form-card button.submit-form:disabled { opacity: 0.5; }
+  .response-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .response-bar button.submit-form.secondary {
+    background: transparent;
+    border: 1px solid var(--you-bubble);
+    color: var(--you-bubble);
+  }
+  .field-editor {
+    display: grid;
+    gap: 8px;
+    width: 100%;
+    margin-top: 4px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+  }
 </style>
 </head>
 <body>
@@ -277,6 +344,233 @@
     });
   }
 
+  // NanCy appends a [NANCY_FORM]{...}[/NANCY_FORM] block to a confirmation
+  // when this channel is in the operator's confirmationForms.renderChannels
+  // config (default just "a2a") — see docs/architecture/confirmation-forms.md.
+  // Strip it from the displayed text and parse it into real form fields.
+  function extractFormBlock(text) {
+    const m = text.match(/\[NANCY_FORM\]([\s\S]*?)\[\/NANCY_FORM\]/);
+    if (!m) return { cleanText: text, form: null };
+    const cleanText = (text.slice(0, m.index) + text.slice(m.index + m[0].length)).trim();
+    try {
+      const form = JSON.parse(m[1]);
+      if (!form || !Array.isArray(form.fields)) return { cleanText, form: null };
+      if (form.fields.length === 0 && form.offersGatherFirst !== true) return { cleanText, form: null };
+      return { cleanText, form };
+    } catch {
+      return { cleanText, form: null };
+    }
+  }
+
+  function formatFieldValue(field, value) {
+    if (field.type === "range" && value && typeof value === "object") return `${value.min}–${value.max}`;
+    return String(value);
+  }
+
+  // NONE of these buttons are themselves consent — only "Etene näillä
+  // tiedoilla" sends the literal "y" NanCy's message_received actually
+  // checks for. The other three just compose an ordinary chat message for
+  // the target agent to read and turn into a brand-new confirmation, which
+  // will need its own "y" — see docs/architecture/confirmation-forms.md.
+  function renderResponseBar(form) {
+    const bar = document.createElement("div");
+    bar.className = "form-card response-bar";
+    const buttons = [];
+    function disableAll() {
+      for (const b of buttons) b.disabled = true;
+    }
+
+    const proceedBtn = document.createElement("button");
+    proceedBtn.type = "button";
+    proceedBtn.className = "submit-form";
+    proceedBtn.textContent = "Etene näillä tiedoilla";
+    proceedBtn.addEventListener("click", () => {
+      disableAll();
+      sendPlainAndRender("y", "y — etene näillä tiedoilla", bar);
+    });
+    bar.appendChild(proceedBtn);
+    buttons.push(proceedBtn);
+
+    if (form.offersGatherFirst) {
+      const gatherBtn = document.createElement("button");
+      gatherBtn.type = "button";
+      gatherBtn.className = "submit-form secondary";
+      gatherBtn.textContent = "Selvitä vaihtoehdot ensin";
+      gatherBtn.addEventListener("click", () => {
+        disableAll();
+        sendPlainAndRender(
+          "Selvitä ensin vaihtoehdot ja esitä ne minulle, ennen kuin teet mitään lopullista.",
+          "Selvitä vaihtoehdot ensin",
+          bar,
+        );
+      });
+      bar.appendChild(gatherBtn);
+      buttons.push(gatherBtn);
+    }
+
+    if (form.fields.length > 0) {
+      const refineBtn = document.createElement("button");
+      refineBtn.type = "button";
+      refineBtn.className = "submit-form secondary";
+      refineBtn.textContent = "Tarkenna lomakkeella";
+      refineBtn.addEventListener("click", () => {
+        disableAll();
+        bar.appendChild(renderFormEditor(form, bar));
+      });
+      bar.appendChild(refineBtn);
+      buttons.push(refineBtn);
+    }
+
+    const textBtn = document.createElement("button");
+    textBtn.type = "button";
+    textBtn.className = "submit-form secondary";
+    textBtn.textContent = "Kuvaile tekstillä";
+    textBtn.addEventListener("click", () => {
+      disableAll();
+      bar.appendChild(renderTextEditor(bar));
+    });
+    bar.appendChild(textBtn);
+    buttons.push(textBtn);
+
+    return bar;
+  }
+
+  // The generated fields plus one always-present free-text field — the
+  // form's fixed purposes are only a starting point, not the only thing the
+  // human can say here.
+  function renderFormEditor(form, bar) {
+    const editor = document.createElement("div");
+    editor.className = "field-editor";
+    const values = {};
+    const readers = [];
+    for (const field of form.fields) {
+      const wrap = document.createElement("div");
+      wrap.className = "field";
+      const label = document.createElement("label");
+      label.textContent = field.label + (field.required ? " *" : "");
+      wrap.appendChild(label);
+      if (field.why) {
+        const why = document.createElement("div");
+        why.className = "why";
+        why.textContent = field.why;
+        wrap.appendChild(why);
+      }
+      if (field.type === "range") {
+        const row = document.createElement("div");
+        row.className = "range-row";
+        const min = document.createElement("input");
+        min.type = "number";
+        min.placeholder = "min";
+        const max = document.createElement("input");
+        max.type = "number";
+        max.placeholder = "max";
+        row.append(min, document.createTextNode("–"), max);
+        wrap.appendChild(row);
+        readers.push(() => {
+          if (min.value === "" || max.value === "") return;
+          const a = Number(min.value);
+          const b = Number(max.value);
+          if (Number.isFinite(a) && Number.isFinite(b)) values[field.id] = a <= b ? { min: a, max: b } : { min: b, max: a };
+        });
+      } else if (field.type === "number") {
+        const input = document.createElement("input");
+        input.type = "number";
+        wrap.appendChild(input);
+        readers.push(() => {
+          if (input.value === "") return;
+          const n = Number(input.value);
+          if (Number.isFinite(n)) values[field.id] = n;
+        });
+      } else if (field.type === "boolean") {
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        wrap.appendChild(input);
+        readers.push(() => { values[field.id] = input.checked; });
+      } else {
+        const input = document.createElement("input");
+        input.type = "text";
+        wrap.appendChild(input);
+        readers.push(() => {
+          const v = input.value.trim();
+          if (v) values[field.id] = v;
+        });
+      }
+      editor.appendChild(wrap);
+    }
+
+    const extraWrap = document.createElement("div");
+    extraWrap.className = "field";
+    const extraLabel = document.createElement("label");
+    extraLabel.textContent = "Lisätietoa (valinnainen)";
+    extraWrap.appendChild(extraLabel);
+    const extraInput = document.createElement("input");
+    extraInput.type = "text";
+    extraWrap.appendChild(extraInput);
+    editor.appendChild(extraWrap);
+
+    const submitBtn = document.createElement("button");
+    submitBtn.type = "button";
+    submitBtn.className = "submit-form";
+    submitBtn.textContent = "Lähetä";
+    submitBtn.addEventListener("click", () => {
+      submitBtn.disabled = true;
+      for (const read of readers) read();
+      const parts = form.fields
+        .filter((f) => Object.prototype.hasOwnProperty.call(values, f.id))
+        .map((f) => `${f.label}: ${formatFieldValue(f, values[f.id])}`);
+      const extra = extraInput.value.trim();
+      if (extra) parts.push(`Lisätietoa: ${extra}`);
+      const text = parts.length > 0 ? parts.join("\n") : "(ei täytettyjä kenttiä)";
+      sendPlainAndRender(text, text, bar);
+    });
+    editor.appendChild(submitBtn);
+    return editor;
+  }
+
+  function renderTextEditor(bar) {
+    const editor = document.createElement("div");
+    editor.className = "field-editor";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.placeholder = "Kuvaile mitä haluat…";
+    editor.appendChild(input);
+    const submitBtn = document.createElement("button");
+    submitBtn.type = "button";
+    submitBtn.className = "submit-form";
+    submitBtn.textContent = "Lähetä";
+    submitBtn.addEventListener("click", () => {
+      const text = input.value.trim();
+      if (!text) return;
+      submitBtn.disabled = true;
+      sendPlainAndRender(text, text, bar);
+    });
+    editor.appendChild(submitBtn);
+    return editor;
+  }
+
+  // Sends `text` over the wire exactly like the ordinary composer would —
+  // no special marker — and shows `displayText` as what "you" said.
+  async function sendPlainAndRender(text, displayText, bar) {
+    addBubble("you", displayText);
+    bar.classList.add("submitted");
+    statusEl.textContent = "lähetetään…";
+    try {
+      const reply = await sendMessage(text);
+      renderReply(reply);
+      statusEl.textContent = "yhdistetty";
+    } catch (err) {
+      addError(err instanceof Error ? err.message : String(err));
+      statusEl.textContent = "virhe";
+    }
+  }
+
+  function renderReply(reply) {
+    const { cleanText, form } = extractFormBlock(reply);
+    addBubble("nancy", cleanText);
+    if (form) log.appendChild(renderResponseBar(form));
+    log.scrollTop = log.scrollHeight;
+  }
+
   function extractTaskText(task) {
     const parts = (task?.artifacts ?? []).flatMap((a) => a.parts ?? []);
     const text = parts
@@ -337,7 +631,7 @@
     statusEl.textContent = "lähetetään…";
     try {
       const reply = await sendMessage(text);
-      addBubble("nancy", reply);
+      renderReply(reply);
       statusEl.textContent = "yhdistetty";
     } catch (err) {
       addError(err instanceof Error ? err.message : String(err));
@@ -349,7 +643,7 @@
   });
 
   statusEl.textContent = urlInput.value ? "valmis" : "täytä asetukset";
-  addSystem('Vastaa "y" vahvistaaksesi Nancyn kysymän luvan.');
+  addSystem('Vastaa "y" (tai paina "Etene näillä tiedoilla") vahvistaaksesi Nancyn kysymän luvan.');
 })();
 </script>
 </body>

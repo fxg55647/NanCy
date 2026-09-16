@@ -229,6 +229,26 @@
       "gapDetection": {
         "type": "boolean",
         "description": "Advisory LLM check run after the required confirmation security review, flagging concrete decision points left unspecified as a NanCy-authored note. Its own errors leave the accepted confirmation unmodified; missing or failed required security analysis still blocks sending. Default true."
+      },
+      "confirmationForms": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "NanCy-generated confirmation forms (v1: number/range/text/boolean fields only, no select/multiselect or trusted option-list config). Independent of gapDetection. Default enabled.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Default true."
+          },
+          "maxFields": {
+            "type": "number",
+            "description": "Cap on how many typed fields a single generated form may carry. Default 4."
+          },
+          "renderChannels": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "channelIds that additionally get the machine-readable [NANCY_FORM] block for a form-rendering client. Every channel (Telegram included) always gets the plain-text field list and menu regardless. Default [\"a2a\"]."
+          }
+        }
       }
     }
   }

@@ -20,7 +20,12 @@ const llmResponse = (content: string, finish_reason = "stop") =>
 
 function register(config: Record<string, unknown> = {}, subagent?: Record<string, (...args: any[]) => any>) {
   const fixture = createFakeApi({
-    pluginConfig: { gapDetection: false, telegramAlerts: false, telegramTaskReports: false, ...config },
+    // gapDetection/confirmationForms: false — these tests are about
+    // session/task-lifecycle edge cases, not either advisory feature, and
+    // several rely on a single-release-cycle fetch mock (see the
+    // session-ends-during-review tests below); an extra sequential call
+    // would either need its own release() or hang forever.
+    pluginConfig: { gapDetection: false, confirmationForms: { enabled: false }, telegramAlerts: false, telegramTaskReports: false, ...config },
     subagent,
   });
   nancy.register(fixture.api as any);

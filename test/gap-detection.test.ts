@@ -130,7 +130,10 @@ test("gapDetection: false skips the check entirely, even with analysis configure
   const orig = globalThis.fetch;
   // @ts-expect-error minimal test stub
   globalThis.fetch = async () => { calls += 1; return { ok: true, json: async () => ({ choices: [{ message: { content: allow } }] }) }; };
-  const { api, handlers, cleanup } = createFakeApi({ pluginConfig: { analysis: analysisCfg, gapDetection: false } });
+  // confirmationForms: false too — this test is specifically about
+  // gapDetection's own on/off switch (see confirmation-forms.test.ts for
+  // that feature's independent toggle).
+  const { api, handlers, cleanup } = createFakeApi({ pluginConfig: { analysis: analysisCfg, gapDetection: false, confirmationForms: { enabled: false } } });
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     nancyPlugin.register(api as any);

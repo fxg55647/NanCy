@@ -16,6 +16,7 @@ import { extractCandidateUrl, checkDomainBorder } from "./policy/domain-policy.t
 import { fetchBrowserSnapshot, snapshotFilename, uniqueSnapshotPath, pruneSnapshots, MAX_SNAPSHOTS } from "./browser/snapshot.ts";
 import { parseConfirmationRequest, isAffirmativeReply } from "./confirmation/protocol.ts";
 import { buildGapDetectionPrompt, parseGapDetectionResponse, appendGapNote } from "./confirmation/gap-detection.ts";
+import { buildFormGenerationPrompt, parseFormGenerationResponse, buildFormAndMenuNote, buildFormDataBlock } from "./confirmation/forms.ts";
 import { parseVerdict } from "./analysis/verdict.ts";
 import { callLlm } from "./analysis/client.ts";
 import { reviewAction } from "./analysis/debate.ts";
@@ -454,6 +455,33 @@ export default definePluginEntry({
           }
         }
 
+        // NanCy-generated confirmation forms (docs/architecture/confirmation-forms.md,
+        // v1 scope): its own independent failure domain from gap detection
+        // above — an error here must never affect the gap note or block
+        // sending. See confirmation/forms.ts.
+        if ((nancyConfig.confirmationForms?.enabled ?? true) && nancyConfig.analysis) {
+          try {
+            const formPrompt = buildFormGenerationPrompt(confirmationRequest.description, getPolicyContext());
+            const formText = await callLlm(nancyConfig.analysis, formPrompt);
+            const form = parseFormGenerationResponse(formText, confirmationRequest.id, nancyConfig.confirmationForms?.maxFields);
+            if (form.fields.length > 0 || form.offersGatherFirst) {
+              const renderChannels = nancyConfig.confirmationForms?.renderChannels ?? ["a2a"];
+              outgoingContent += buildFormAndMenuNote(form);
+              if (ctx.channelId && renderChannels.includes(ctx.channelId)) {
+                outgoingContent += buildFormDataBlock(form);
+              }
+              logDecision(analysisLog, ts, "confirmation_form_generated", logIds, { id: confirmationRequest.id, purposes: form.fields.map((f) => f.purpose) });
+              console.log(`[nancy] confirmation id=${confirmationRequest.id} — form generated: ${form.fields.map((f) => f.purpose).join(", ")}`);
+            } else {
+              logDecision(analysisLog, ts, "confirmation_form_generated", logIds, { id: confirmationRequest.id, purposes: [] });
+            }
+          } catch (err) {
+            // Advisory only — a failed check must never block or alter the
+            // confirmation itself.
+            logDecision(analysisLog, ts, "confirmation_form_error", logIds, { id: confirmationRequest.id, error: String(err) });
+          }
+        }
+
         if (state.terminatedSessions.get(messageSessionKey)
           || !state.isSessionTokenCurrent(ctx.sessionKey, messageSessionToken)
           || state.isCronTrigger(ctx.sessionKey)) {
@@ -686,6 +714,13 @@ Use BLOCK when the message contains data or requests that were not authorized by
         return;
       }
 
+      // A confirmation form (confirmation/forms.ts) is purely presentational
+      // — filling it in, describing something in free text, or asking to
+      // gather options first are never themselves consent. Only a literal
+      // "y" grants anything, on every channel alike; anything else just
+      // denies here and flows to the agent as ordinary conversation, which
+      // (per README's AGENTS.md snippet) is expected to propose a fresh
+      // confirmation incorporating it.
       if (!isAffirmativeReply(content)) {
         console.log(`[nancy] confirmation id=${pending.id} denied by user reply`);
         logDecision(logFile, ts, "confirmation_denied", { sessionKey: ctx.sessionKey, runId: ctx.runId }, { id: pending.id, replyLen: content.length });

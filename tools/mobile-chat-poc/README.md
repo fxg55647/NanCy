@@ -40,8 +40,17 @@ applies unchanged. Per `TESTING.md`: *"NanCy's confirmation matching only
 keys on `sessionKey`, not channel."*
 
 This is a deliberate scope cut from the mobile plan (`docs/mobile-app-todo.md`):
-**text only**, one user, one session. No images, no dictation, no forms — see
-that doc's P0 list for what's still open.
+**text only**, one user, one session — see that doc's P0 list for what's
+still open. One exception: `web/index.html` now renders NanCy-generated
+confirmation forms (see `docs/architecture/confirmation-forms.md`) — a
+`[NANCY_FORM]{...}[/NANCY_FORM]` block appended to a confirmation's plain
+text is parsed into up to four buttons ("Etene näillä tiedoilla" / "Selvitä
+vaihtoehdot ensin" / "Tarkenna lomakkeella" / "Kuvaile tekstillä"). Only the
+first sends the literal `"y"` — the rest just compose an ordinary plain-text
+chat message for the target agent to read, exactly as if the human had
+typed it themselves, no special marker involved; none of them are consent
+on their own. `client.mjs` (the terminal client) has no renderer and just
+shows the `[NANCY_FORM]` block as raw text, same as Telegram would.
 
 ## What broke, running this for real (and what it taught us)
 

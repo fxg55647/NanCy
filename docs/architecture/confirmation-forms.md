@@ -1,13 +1,60 @@
 # NanCy-Generated Confirmation Forms
 
-Status: **design only, not implemented.** This is a preliminary design record
-for a feature discussed while building `tools/mobile-chat-poc/`, not yet
-started in code. Read it before implementing anything under
-`src/confirmation/` or `tools/mobile-chat-poc/web/` named "form" — the goal
-is to keep the eventual implementation consistent with the security
-invariants below rather than improvising them at build time. See
-`docs/mobile-app-todo.md`'s P0 "Kysymykset ja lomakkeet" checklist, which
-this design record exists to make concrete.
+Status: **v1 implemented** in `src/confirmation/forms.ts`, wired into
+`message_sending`/`message_received` in `src/index.ts`, and rendered by
+`tools/mobile-chat-poc/web/index.html`. This is a deliberate scope cut from
+the design below, decided when implementation started:
+
+- **Only number/range/text/boolean field types.** No select/multiselect
+  authorization fields, and therefore no trusted-config option-list source
+  either — this sidesteps "Where trusted option lists would come from"
+  (still open, still undecided) entirely, since every v1 `FieldPurpose`
+  resolves to one of those four plain types by a fixed lookup table, never
+  the model's own choice. The two motivating examples (a price range, a
+  time range) are both numeric spans, not enumerated choices, so this
+  covers the cases that prompted the feature.
+- A field's `purpose` is the only thing the model proposes; `kind` *and*
+  `type` are both derived from it via a fixed table in `forms.ts` — a
+  stricter mechanical backstop than the sketch below, where a field carried
+  its own `type`.
+- **The form (and the response-mode menu next to it) is purely
+  presentational — none of it is a way to grant a task.** This is stricter
+  than the "Delivery and submission" sketch below, which floated a
+  structured `{confirmationId, values}` submission as a second affirmative
+  step of its own. In practice that still meant *something other than a
+  literal "y" reply* could authorize a task, which reintroduced exactly the
+  asymmetry-between-channels problem this feature was supposed to avoid
+  (a rendering client's "submit" tap would count, but the identical values
+  typed as plain text on Telegram needed its own separate parser to count
+  the same way). v1 instead keeps the *entire* consent mechanism exactly as
+  it was before this feature existed: only `isAffirmativeReply` in
+  `message_received` ever grants anything, unchanged, on every channel
+  alike. Filling in the form, describing something in free text, or asking
+  to gather options first are all just ways to give the target agent more
+  to work with; the agent (per the README.md AGENTS.md snippet, updated
+  alongside this feature) is expected to read that and propose a **fresh**
+  confirmation — its own free-text template, reviewed like any other — for
+  the human to actually approve with a real "y". This is genuinely
+  zero-NanCy-code for every response mode except generating and presenting
+  the form itself — see task-confirmation-menu.md's finding, which now
+  applies without the one exception it originally needed.
+- Whether "gather options first" (task-confirmation-menu.md's option 5)
+  plausibly applies to this task at all is its own boolean
+  (`GeneratedForm.offersGatherFirst`), decided by the same generation call —
+  a task with nothing to look up (e.g. "send this exact email") doesn't
+  offer it. This can be true even with zero typed fields.
+- Telegram (or any channel not listed in `confirmationForms.renderChannels`,
+  default `["a2a"]`) never receives the machine-readable `[NANCY_FORM]`
+  block — only the always-safe plain-text field list and menu, which spells
+  out explicitly that only "y" is consent (a text-only channel has no
+  buttons to make that obvious the way the mobile UI's button layout does).
+- The whole feature is `confirmationForms.enabled` (default true),
+  independent of `gapDetection`'s own switch.
+
+Everything below this line is the **original design sketch**, kept for the
+reasoning and for what's still open (multi-step forms, editing a granted
+task's fields, the trusted-option-list question for a future select/multiselect
+version) — read it for context, not as a description of what shipped.
 
 ## Why this exists
 

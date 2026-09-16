@@ -23,6 +23,7 @@ Status: early-stage and "research and development only" per README's warning ban
 - `src/policy/denial-policy.ts` — normalized denial classification, runtime-scoped total/burst counters, deterministic termination, and burst-review triggering.
 - `src/confirmation/protocol.ts` — `parseConfirmationRequest()` / `isAffirmativeReply()` — intent confirmation flow (feature #2).
 - `src/confirmation/gap-detection.ts` — advisory-only LLM check flagging unspecified decision points in a proposed confirmation before the human sees it (feature #2's other half). See `docs/architecture/gap-detection.md`.
+- `src/confirmation/forms.ts` — NanCy-generated confirmation forms (v1: number/range/text/boolean fields only, purpose fixed by the model but kind/type always derived mechanically from a fixed lookup table) plus the response-mode menu, appended after the gap-detection note; independent `confirmationForms` on/off switch. See `docs/architecture/confirmation-forms.md`.
 - `src/confirmation/tasks.ts` — per-session confirmed-task authorization and pending-confirmation state.
 - `src/workers/worker-manager.ts` — spawns/waits-for/cleans-up the isolated worker session per confirmed task.
 - `src/notifications/telegram.ts` — Telegram alerting/status pushes, block-alert debounce.

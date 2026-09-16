@@ -1,6 +1,23 @@
 # Task Confirmation: a menu of response modes (design discussion)
 
-Status: **design discussion, not implemented.** Captures the reasoning from a brainstorm session, not a committed spec like Part C in [`denial-escalation-and-clarification.md`](./denial-escalation-and-clarification.md) — read that doc first for the Clarify Mode design this one builds on.
+Status: **option 3 (the form) is now implemented, presentationally** — see
+[`confirmation-forms.md`](./confirmation-forms.md)'s "v1 implemented" status
+line for the actual shape. The menu below is now genuinely presented to the
+user (`buildFormAndMenuNote`/`buildFormDataBlock` in
+`src/confirmation/forms.ts`) whenever a form is generated. This doc's key
+finding held even more strongly than predicted: it turned out **all four**
+of options 1, 3, 4, and 5 need zero NanCy code, including the form — a
+reply that isn't a literal "y" is simply left as an ordinary denial
+(`src/index.ts`'s `message_received`, completely unchanged by this
+feature), which flows to the target agent as normal conversation for it to
+turn into a fresh confirmation; only the AGENTS.md snippet in README.md was
+extended so the agent reacts to that sensibly. (An earlier draft of the
+implementation gave option 3 its own structured-submission grant path as a
+second way to say "yes" — dropped before shipping, precisely because it
+broke the "one rule, every channel" property the other three options keep.)
+Option 2 ("always confirm when needed") remains unimplemented, per Part C of
+[`denial-escalation-and-clarification.md`](./denial-escalation-and-clarification.md)
+— read that doc first for the Clarify Mode design this one builds on.
 
 ## The idea
 

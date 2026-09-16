@@ -35,6 +35,20 @@ export interface DomainConfig {
   urlhausAuthKey?: string;
 }
 
+export interface ConfirmationFormsConfig {
+  // Default true.
+  enabled?: boolean;
+  // Cap on how many typed fields a single generated form may carry. Default 4.
+  maxFields?: number;
+  // channelIds that additionally get the machine-readable [NANCY_FORM]...
+  // block appended to a confirmation (for a client that can render real
+  // inputs, e.g. tools/mobile-chat-poc/web/). Every channel — including any
+  // not listed here, e.g. Telegram — always gets the plain-text field list
+  // and response-mode menu regardless; this only controls the extra
+  // structured block. Default ["a2a"].
+  renderChannels?: string[];
+}
+
 export interface ArweaveAnchoringConfig {
   // Explicit opt-in. No wallet is read and no network call is made otherwise.
   enabled?: boolean;
@@ -159,6 +173,18 @@ export interface NancyConfig {
   // security-reviewed confirmation unmodified. Missing/failed required
   // confirmation analysis still blocks. Default true.
   gapDetection?: boolean;
+  // NanCy-generated confirmation forms (docs/architecture/confirmation-forms.md,
+  // v1 scope): when a proposed confirmation looks like it has decision
+  // points a small typed form could fill (a price range, a time range,
+  // etc. — number/range/text/boolean fields only in v1, no
+  // select/multiselect or trusted option-list config yet), NanCy proposes
+  // one and appends it, plus a fixed response-mode menu, after the
+  // existing gap-detection note. Independent of gapDetection — either can
+  // be turned off without affecting the other. A submitted form's values
+  // are merged deterministically (never via an LLM rewrite) into the
+  // locked task description once the human's reply is recognized as
+  // filling it in — see src/confirmation/forms.ts. Default true.
+  confirmationForms?: ConfirmationFormsConfig;
 }
 
 // Best-effort SecretInput resolution: config fields like telegram.botToken can be
