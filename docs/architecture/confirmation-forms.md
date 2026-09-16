@@ -228,6 +228,40 @@ directly, never something the model reports about itself.
   value `spend-policy.ts`'s `SpendIntent.amount` could later be checked
   against, if both are ever built.
 
+## Related work (external — for this design only, not NanCy's shipped core)
+
+`RELATED-WORK.md` at the repo root covers prior art for NanCy's actual
+shipped mechanism (the stateless reviewer plus code-owned confirmed-task
+record) — deliberately kept separate from this section, which is prior art
+for the *form* idea specifically and should not be read as claims about
+anything already implemented.
+
+- **["Options, Not Clicks: Lattice Refinement for Consent-Driven MCP
+  Authorization"](https://arxiv.org/pdf/2605.11360)** proposes replacing
+  free-text or binary allow/deny authorization prompts with dynamically
+  generated, bounded, hierarchical choices — aimed at the same "consent
+  fatigue" problem this design exists to avoid. Its lattice organizes
+  *how much access* a grant covers (deny-all → read-only → specific
+  files); this design's authorization/specification field split instead
+  organizes *which exact values* apply within one already-agreed action
+  (a price, a payment method) — a different axis of the same underlying
+  idea (structured, bounded choices over free text), not the same
+  mechanism restated.
+- **Slot filling in task-oriented dialogue systems** (a decades-old NLP
+  technique, now commonly done zero-shot with LLMs — e.g. the "Zero-shot
+  Slot Filling in the Age of LLMs for Dialogue Systems" survey,
+  [ACL Anthology](https://aclanthology.org/2025.coling-industry.59.pdf))
+  is the general technique this design applies to the authorization
+  domain specifically: extract structured fields (slots) from a
+  free-text request, then confirm the filled result with the user before
+  acting on it. Worth reading before implementing the generation prompt in
+  `src/confirmation/form-generation.ts` (sketched above) — established
+  confirmation strategies from that literature (re-prompt only the missing
+  or invalid slots, not the whole form; distinguish "confirm current
+  values" from "confirm submission") likely transfer directly and are
+  better prior art for the interaction design than reinventing it from
+  scratch.
+
 ## Open questions before this could ship
 
 - Where trusted option lists (payment methods, addresses) actually live —
