@@ -369,6 +369,8 @@ Reply y to proceed, any other reply cancels.
 IMPORTANT: Every single attempt requires a fresh confirmation message with a new ID number. If a task fails or is interrupted for any reason, the previous confirmation is void — send a new confirmation message before trying again, even if the task is identical to the previous one. Do not write to `tasks/` yourself; NanCy blocks it.
 
 Once you see a task reflected as the current confirmed task, it authorizes everything needed to finish it — do not send another confirmation partway through just because you have now learned more specific details along the way. Only send a new one if the user asks for something different, or the previous attempt failed or was interrupted.
+
+If some detail was left unspecified and the user doesn't provide one when you ask, make the typical, middle-of-the-road choice among the valid options and proceed — don't keep asking, and don't optimize for cheapest, most expensive, or most unusual just because nothing was specified.
 ```
 
 ### 4. Restart OpenClaw

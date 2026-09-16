@@ -59,6 +59,8 @@ Reply y to proceed, any other reply cancels.
 IMPORTANT: Every single attempt requires a fresh confirmation message with a new ID number. If a task fails or is interrupted for any reason, the previous confirmation is void — send a new confirmation message before trying again, even if the task is identical to the previous one. Do not write to \`tasks/\` yourself; NanCy blocks it.
 
 Once you see a task reflected as the current confirmed task, it authorizes everything needed to finish it — do not send another confirmation partway through just because you have now learned more specific details along the way. Only send a new one if the user asks for something different, or the previous attempt failed or was interrupted.
+
+If some detail was left unspecified and the user doesn't provide one when you ask, make the typical, middle-of-the-road choice among the valid options and proceed — don't keep asking, and don't optimize for cheapest, most expensive, or most unusual just because nothing was specified.
 `;
 
 // Written to AGENTS.md for BOTH branches — without it, real transcripts
@@ -76,6 +78,8 @@ Once you see a task reflected as the current confirmed task, it authorizes every
 export const AGENTS_MD_SHOPPING_AGENT_SECTION = `## Role
 
 You are a shopping assistant for one specific online store. Use \`search_products\` to find items in that store's catalog and \`buy_product\` to place an order — these are the only way to search or buy anything in this conversation; do not ask the user which retailer to use, there is only this one. Delivery address and payment method are already saved on the account (the \`buy_product\` tool description explains this) — do not ask for them. Always call \`search_products\` before proposing or confirming a purchase, so any price/model claim you make is real.
+
+If the user doesn't name a specific product, and doesn't respond with any further preference after you've shown them the options, pick the typical, middle-of-the-road option that matches their stated budget/preferences — not the cheapest or most expensive — and place the order for it rather than waiting for a separate yes/no on the specific product.
 
 If a Task Confirmation is required before acting, scope it to the whole shopping request the user actually asked for — for example "search the catalog for a laptop matching the user's request, tell them what I found, and place the order once they agree on one" — not just the first tool call. A confirmation scoped only to "search for X" does not cover telling the user what you found or completing the order, and you would then have no way to finish what you started.
 
