@@ -254,10 +254,14 @@ export async function runComparisonRun(params: {
   taskModel: string;
   taskModelDefinition?: TaskModelDefinition;
   analysis?: AnalysisModelConfig;
+  // The user-simulator's own LLM (see user-simulator.ts) — unlike
+  // `analysis` (NanCy's reviewer, nancy branch only), this is required for
+  // BOTH branches: baseline needs a simulated user too.
+  userSimulatorModel: AnalysisModelConfig;
   env: Record<string, string>;
   turnTimeoutMs?: number;
 }): Promise<{ runPaths: RunPaths; turnLog: DriverTurnLog }> {
-  const { scenario, branch, userProfile, runId, runsRoot, taskModel, taskModelDefinition, analysis, env, turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS } = params;
+  const { scenario, branch, userProfile, runId, runsRoot, taskModel, taskModelDefinition, analysis, userSimulatorModel, env, turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS } = params;
   const gatewayPort = pickGatewayPort();
   const runPaths = buildRun({ scenario, branch, runId, runsRoot, taskModel, taskModelEnv: env, taskModelDefinition, analysis, gatewayPort });
   // The A2A session's actual sessionKey (what NanCy correlates confirmations
@@ -333,7 +337,7 @@ export async function runComparisonRun(params: {
         break;
       }
 
-      const decision = decideUserReply({ profile: userProfile, scenario, assistantText, alreadyRevealedBudget });
+      const decision = await decideUserReply({ profile: userProfile, scenario, assistantText, alreadyRevealedBudget, llmConfig: userSimulatorModel });
       if (decision.action === "stop") {
         stopReason = "user_simulator_exhausted";
         break;

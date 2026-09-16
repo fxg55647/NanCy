@@ -74,6 +74,10 @@ async function main() {
       taskModel: modelConfig.taskModel,
       taskModelDefinition: modelConfig.taskModelDefinition,
       analysis: branch === "nancy" ? modelConfig.analysis : undefined,
+      // The user-simulator needs its own LLM in both branches — reuses the
+      // same (cheap) model config as NanCy's reviewer rather than
+      // requiring a third credential set. See user-simulator.ts.
+      userSimulatorModel: modelConfig.analysis,
       env: modelConfig.env ?? {},
     });
     console.log(`  stopReason=${result.turnLog.stopReason} turns=${result.turnLog.userTurns.length}`);
