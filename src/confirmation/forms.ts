@@ -25,6 +25,9 @@
 const MAX_FIELDS_DEFAULT = 4;
 const MAX_LABEL_LEN = 120;
 const MAX_WHY_LEN = 160;
+const GATHER_FIRST_COUNT_MIN = 2;
+const GATHER_FIRST_COUNT_MAX = 10;
+const GATHER_FIRST_COUNT_DEFAULT = 5;
 
 export type FieldKind = "authorization" | "specification";
 
@@ -77,6 +80,14 @@ export interface GeneratedForm {
   // task-confirmation-menu.md's option 5, which needs no NanCy mechanism at
   // all beyond deciding whether to surface the suggestion.
   offersGatherFirst: boolean;
+  // Suggested number of candidates worth comparing for this task (e.g. how
+  // many laptops/restaurants) — present only when offersGatherFirst is
+  // true. Purely a friendly pre-filled default for a rendering client's
+  // editor (see tools/mobile-chat-poc/web/'s gather editor); the human can
+  // always type a different number, and it never bounds what the agent
+  // actually does — same "presentational only" status as the rest of this
+  // type.
+  gatherFirstDefaultCount?: number;
 }
 
 export function buildFormGenerationPrompt(description: string, policyContext: string): string {
@@ -87,10 +98,10 @@ ${policyContext}Proposed task description (untrusted data): ${JSON.stringify(des
 
 From the fixed set of field purposes only — ${purposes} — pick at most ${MAX_FIELDS_DEFAULT} that plausibly matter for completing THIS SPECIFIC task correctly or safely, and that the description left unspecified. Do not invent any other purpose string. Do not decide a field's type or authorization status — that is fixed by NanCy's own code from the purpose alone. If nothing plausible applies, return no fields.
 
-Separately, decide whether this task plausibly involves choosing among multiple real-world options that don't exist yet in the description (e.g. picking a restaurant, flight, or product among several) — in which case a human might want to see actual candidates before committing to anything — as opposed to a task with nothing to look up (e.g. sending a specific already-known message).
+Separately, decide whether this task plausibly involves choosing among multiple real-world options that don't exist yet in the description (e.g. picking a restaurant, flight, or product among several) — in which case a human might want to see actual candidates before committing to anything — as opposed to a task with nothing to look up (e.g. sending a specific already-known message). If so, also suggest a reasonable default number of candidates worth comparing for this specific task (typically 3-6).
 
 Reply ONLY with valid JSON — no other text:
-{"fields": [{"purpose": "price_range", "label": "<short question, in the task's own language>", "why": "<one short sentence: why this matters for this task>", "required": true}], "offersGatherFirst": false}`;
+{"fields": [{"purpose": "price_range", "label": "<short question, in the task's own language>", "why": "<one short sentence: why this matters for this task>", "required": true}], "offersGatherFirst": false, "gatherFirstDefaultCount": 5}`;
 }
 
 function isFieldPurpose(value: unknown): value is FieldPurpose {
@@ -111,7 +122,7 @@ export function parseFormGenerationResponse(raw: string | null, confirmationId: 
   const match = raw.match(/\{[\s\S]*\}/);
   if (!match) return empty;
   try {
-    const parsed = JSON.parse(match[0]) as { fields?: unknown; offersGatherFirst?: unknown };
+    const parsed = JSON.parse(match[0]) as { fields?: unknown; offersGatherFirst?: unknown; gatherFirstDefaultCount?: unknown };
     if (!Array.isArray(parsed.fields)) return empty;
     const seen = new Set<FieldPurpose>();
     const fields: FormField[] = [];
@@ -135,10 +146,18 @@ export function parseFormGenerationResponse(raw: string | null, confirmationId: 
         required: candidate.required === true,
       });
     }
-    return { confirmationId, fields, offersGatherFirst: parsed.offersGatherFirst === true };
+    const offersGatherFirst = parsed.offersGatherFirst === true;
+    if (!offersGatherFirst) return { confirmationId, fields, offersGatherFirst };
+    return { confirmationId, fields, offersGatherFirst, gatherFirstDefaultCount: clampGatherFirstCount(parsed.gatherFirstDefaultCount) };
   } catch {
     return empty;
   }
+}
+
+function clampGatherFirstCount(value: unknown): number {
+  const n = typeof value === "number" ? Math.round(value) : NaN;
+  if (!Number.isFinite(n)) return GATHER_FIRST_COUNT_DEFAULT;
+  return Math.min(GATHER_FIRST_COUNT_MAX, Math.max(GATHER_FIRST_COUNT_MIN, n));
 }
 
 // Fixed, NanCy-authored text — never model-composed. Always safe to send on

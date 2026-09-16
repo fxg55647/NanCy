@@ -226,6 +226,27 @@
     padding-top: 8px;
     border-top: 1px solid var(--border);
   }
+  .results-view { max-width: 92%; }
+  .results-body { margin-top: 4px; }
+  .results-line {
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .results-line:last-child { border-bottom: none; }
+  .results-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 8px;
+  }
+  .results-card {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px;
+    font-size: 12px;
+  }
+  .results-card .field { margin-bottom: 4px; }
+  .results-card .field label { display: block; font-size: 11px; text-transform: uppercase; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -398,11 +419,7 @@
       gatherBtn.textContent = "Selvitä vaihtoehdot ensin";
       gatherBtn.addEventListener("click", () => {
         disableAll();
-        sendPlainAndRender(
-          "Selvitä ensin vaihtoehdot ja esitä ne minulle, ennen kuin teet mitään lopullista.",
-          "Selvitä vaihtoehdot ensin",
-          bar,
-        );
+        bar.appendChild(renderGatherEditor(form, bar));
       });
       bar.appendChild(gatherBtn);
       buttons.push(gatherBtn);
@@ -548,6 +565,35 @@
     return editor;
   }
 
+  function renderGatherEditor(form, bar) {
+    const editor = document.createElement("div");
+    editor.className = "field-editor";
+    const wrap = document.createElement("div");
+    wrap.className = "field";
+    const label = document.createElement("label");
+    label.textContent = "Kuinka monta vaihtoehtoa haluat vertailuun?";
+    wrap.appendChild(label);
+    const input = document.createElement("input");
+    input.type = "number";
+    input.min = "1";
+    input.value = String(form.gatherFirstDefaultCount ?? 5);
+    wrap.appendChild(input);
+    editor.appendChild(wrap);
+    const submitBtn = document.createElement("button");
+    submitBtn.type = "button";
+    submitBtn.className = "submit-form";
+    submitBtn.textContent = "Lähetä";
+    submitBtn.addEventListener("click", () => {
+      submitBtn.disabled = true;
+      const n = Number(input.value);
+      const count = Number.isFinite(n) && n > 0 ? Math.round(n) : (form.gatherFirstDefaultCount ?? 5);
+      const text = `Selvitä ensin enintään ${count} vaihtoehtoa ja esitä ne minulle, ennen kuin teet mitään lopullista.`;
+      sendPlainAndRender(text, `Selvitä vaihtoehdot ensin (enintään ${count})`, bar);
+    });
+    editor.appendChild(submitBtn);
+    return editor;
+  }
+
   // Sends `text` over the wire exactly like the ordinary composer would —
   // no special marker — and shows `displayText` as what "you" said.
   async function sendPlainAndRender(text, displayText, bar) {
@@ -564,10 +610,102 @@
     }
   }
 
+  // Optional convention the target agent may use to report back gathered
+  // candidates (docs/architecture/gather-results-format.md) — agent-authored,
+  // not generated or validated by NanCy. Same defensive-extraction shape as
+  // extractFormBlock: any failure just leaves the raw text to display.
+  function extractResultsBlock(text) {
+    const m = text.match(/\[NANCY_RESULTS\]([\s\S]*?)\[\/NANCY_RESULTS\]/);
+    if (!m) return { cleanText: text, items: null };
+    const cleanText = (text.slice(0, m.index) + text.slice(m.index + m[0].length)).trim();
+    try {
+      const parsed = JSON.parse(m[1]);
+      if (!parsed || !Array.isArray(parsed.items) || parsed.items.length === 0) return { cleanText, items: null };
+      if (!parsed.items.every((it) => it && typeof it === "object" && !Array.isArray(it))) return { cleanText, items: null };
+      return { cleanText, items: parsed.items };
+    } catch {
+      return { cleanText, items: null };
+    }
+  }
+
+  // Item keys are not known ahead of time — the agent may improvise them
+  // per call, even per item. Every value is untrusted (it came from pages
+  // the agent visited), so everything here uses textContent, never innerHTML.
+  function renderResultsView(items) {
+    const container = document.createElement("div");
+    container.className = "form-card results-view";
+
+    const toggle = document.createElement("div");
+    toggle.className = "response-bar";
+    const listBtn = document.createElement("button");
+    listBtn.type = "button";
+    listBtn.className = "submit-form";
+    listBtn.textContent = "Listana";
+    const cardBtn = document.createElement("button");
+    cardBtn.type = "button";
+    cardBtn.className = "submit-form secondary";
+    cardBtn.textContent = "Lomakkeena";
+    toggle.append(listBtn, cardBtn);
+    container.appendChild(toggle);
+
+    const body = document.createElement("div");
+    body.className = "results-body";
+    container.appendChild(body);
+
+    function itemEntries(item) {
+      return Object.entries(item).filter(([, v]) => v !== null && v !== undefined);
+    }
+
+    function showList() {
+      listBtn.className = "submit-form";
+      cardBtn.className = "submit-form secondary";
+      body.textContent = "";
+      const ul = document.createElement("div");
+      for (const item of items) {
+        const line = document.createElement("div");
+        line.className = "results-line";
+        line.textContent = itemEntries(item).map(([k, v]) => `${k}: ${v}`).join(" · ");
+        ul.appendChild(line);
+      }
+      body.appendChild(ul);
+    }
+
+    function showCards() {
+      listBtn.className = "submit-form secondary";
+      cardBtn.className = "submit-form";
+      body.textContent = "";
+      const grid = document.createElement("div");
+      grid.className = "results-grid";
+      for (const item of items) {
+        const card = document.createElement("div");
+        card.className = "results-card";
+        for (const [k, v] of itemEntries(item)) {
+          const row = document.createElement("div");
+          row.className = "field";
+          const label = document.createElement("label");
+          label.textContent = k;
+          const val = document.createElement("div");
+          val.textContent = String(v);
+          row.append(label, val);
+          card.appendChild(row);
+        }
+        grid.appendChild(card);
+      }
+      body.appendChild(grid);
+    }
+
+    listBtn.addEventListener("click", showList);
+    cardBtn.addEventListener("click", showCards);
+    showList();
+    return container;
+  }
+
   function renderReply(reply) {
-    const { cleanText, form } = extractFormBlock(reply);
+    const { cleanText: afterForm, form } = extractFormBlock(reply);
+    const { cleanText, items } = extractResultsBlock(afterForm);
     addBubble("nancy", cleanText);
     if (form) log.appendChild(renderResponseBar(form));
+    if (items) log.appendChild(renderResultsView(items));
     log.scrollTop = log.scrollHeight;
   }
 

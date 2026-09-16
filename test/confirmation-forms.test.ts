@@ -71,6 +71,19 @@ test("parseFormGenerationResponse parses offersGatherFirst independently of fiel
   assert.equal(parseFormGenerationResponse('{"fields": [], "offersGatherFirst": "yes"}', "id1").offersGatherFirst, false, "only a literal boolean true counts");
 });
 
+test("parseFormGenerationResponse clamps gatherFirstDefaultCount into [2, 10] and defaults to 5", () => {
+  assert.equal(parseFormGenerationResponse('{"fields": [], "offersGatherFirst": true, "gatherFirstDefaultCount": 4}', "id1").gatherFirstDefaultCount, 4);
+  assert.equal(parseFormGenerationResponse('{"fields": [], "offersGatherFirst": true, "gatherFirstDefaultCount": 500}', "id1").gatherFirstDefaultCount, 10, "must clamp an absurdly large model-suggested count");
+  assert.equal(parseFormGenerationResponse('{"fields": [], "offersGatherFirst": true, "gatherFirstDefaultCount": 0}', "id1").gatherFirstDefaultCount, 2, "must clamp a too-small count up to the floor");
+  assert.equal(parseFormGenerationResponse('{"fields": [], "offersGatherFirst": true, "gatherFirstDefaultCount": "many"}', "id1").gatherFirstDefaultCount, 5, "a non-numeric count must fall back to the default, not throw");
+  assert.equal(parseFormGenerationResponse('{"fields": [], "offersGatherFirst": true}', "id1").gatherFirstDefaultCount, 5, "a missing count must fall back to the default");
+});
+
+test("parseFormGenerationResponse never sets gatherFirstDefaultCount when offersGatherFirst is false", () => {
+  const form = parseFormGenerationResponse('{"fields": [], "offersGatherFirst": false, "gatherFirstDefaultCount": 7}', "id1");
+  assert.equal(form.gatherFirstDefaultCount, undefined, "a count is meaningless without offersGatherFirst, and must not leak through");
+});
+
 // --- buildFormAndMenuNote / buildFormDataBlock (pure) ---
 
 const sampleForm: GeneratedForm = {
