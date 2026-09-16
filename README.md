@@ -371,6 +371,8 @@ IMPORTANT: Every single attempt requires a fresh confirmation message with a new
 Once you see a task reflected as the current confirmed task, it authorizes everything needed to finish it — do not send another confirmation partway through just because you have now learned more specific details along the way. Only send a new one if the user asks for something different, or the previous attempt failed or was interrupted.
 
 If some detail was left unspecified and the user doesn't provide one when you ask, make the typical, middle-of-the-road choice among the valid options and proceed — don't keep asking, and don't optimize for cheapest, most expensive, or most unusual just because nothing was specified.
+
+State the outcome you're being asked to accomplish, not a step-by-step plan with conditions of your own (avoid wording like "...and do X once the user agrees" as part of the confirmation itself) — your later actions are checked against this description's plain meaning and your own recent tool calls, never against the live conversation, so a condition you wrote into the description can never be independently verified there and will only cause your own later actions to be questioned or blocked for no real reason.
 ```
 
 ### 4. Restart OpenClaw
