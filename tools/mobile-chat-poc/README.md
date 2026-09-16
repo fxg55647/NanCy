@@ -1,13 +1,17 @@
 # Mobile chat POC — A2A-backed
 
-Status: **verified against a real isolated Gateway, including a real phone
-over LAN.** This is the first concrete step on `docs/mobile-app-todo.md`'s
-"Yhteys nykyiseen Nancyyn" checklist — proving that a phone can hold a
-plain-text chat with an OpenClaw agent behind NanCy, with **no new NanCy code
-and no new OpenClaw channel plugin**. Two real, pre-existing NanCy bugs were
-found and fixed along the way (see "What broke" below) — this POC is why they
-were ever discovered. One thing is still not directly observed end-to-end;
-see "What's genuinely unverified."
+Status: **the full confirmation dance is verified working end-to-end over a
+real A2A session against a real model** — `blocked_no_confirmed_task` →
+`confirmation_requested` → `"y"` → `confirmation_granted` → the next
+`before_tool_call` carrying that `taskId` → a real reviewer verdict that
+matches the confirmed task (`test_mode_would_allow`, dry-run only because
+`testMode: true`). This is the first concrete step on
+`docs/mobile-app-todo.md`'s "Yhteys nykyiseen Nancyyn" checklist — proving
+that a phone can hold a plain-text chat with an OpenClaw agent behind NanCy,
+with **no new NanCy code and no new OpenClaw channel plugin**. Six real,
+pre-existing NanCy/tooling bugs were found and fixed along the way (see
+"What broke" below) — this POC is why they were ever discovered, and the
+run above only started fully succeeding once all six were in place.
 
 ## Why this exists, and why it's not a new channel plugin
 
@@ -78,43 +82,63 @@ needed a real Gateway, a real model, and (for the last two) a real phone.
    talks to one origin, so CORS never applies. **A real native mobile client
    (not a browser page) would not hit this at all** — CORS is a browser
    enforcement, not a wire-protocol restriction.
-4. **Two real NanCy bugs, unrelated to A2A itself, found only because a real
-   model was in the loop:** `src/analysis/client.ts`'s reviewer call could
-   exhaust its output budget on a "thinking" model's internal reasoning
-   before ever producing a verdict (`MAX_TOKENS`), and `message_sending`'s
-   design meant no outbound reply of any kind — not even a plain "hi" — could
-   go out without a confirmed task. Both fixed; both are real behavior that
-   would have affected the operator's live Telegram deployment too, not just
-   this POC. See `CLAUDE.md`'s "Recent focus" and README.md feature #10 for
-   the full detail — this file only covers the mobile-transport angle.
+4. **Four real NanCy bugs, unrelated to A2A's transport plumbing, found only
+   because a real model was in the loop and the round trip was actually
+   pushed all the way through:**
+   - `src/analysis/client.ts`'s reviewer call could exhaust its output
+     budget on a "thinking" model's internal reasoning before ever producing
+     a verdict (`MAX_TOKENS`).
+   - `message_sending`'s design meant no outbound reply of any kind — not
+     even a plain "hi" — could go out without a confirmed task
+     (`allowUnconfirmedChatReplies`).
+   - The confirmation-request reviewer's own verdict/reason was never logged
+     anywhere retrievable, so a blocked confirmation was unrecoverable after
+     the fact — fixed by logging it like every other verdict does.
+   - That same reviewer was treating the `a2a` channel type itself as
+     evidence the destination wasn't a real human, producing a false
+     CLARIFY independent of the actual message content — fixed by telling it
+     a configured, token-authenticated channel is exactly as trusted as any
+     other. This one would have affected any real phone user, not just a
+     synthetic test.
 
-## What's genuinely unverified
+   All four are real behavior that would have affected the operator's live
+   Telegram deployment too, not just this POC. See `CLAUDE.md`'s "Recent
+   focus" and README.md feature #10 for the full detail on the first two —
+   this file only covers the mobile-transport angle.
+5. **A2A's `contextId` belongs on the `message` object, not top-level in
+   `SendMessage`'s params.** OpenClaw's own `A2aSendMessageParamsSchema`
+   silently ignores a top-level `contextId` rather than rejecting it, so
+   every turn looked like it should continue the conversation but actually
+   started a brand-new session every time — the human's `"y"` could never
+   resolve a confirmation it was never actually a reply to. Fixed in both
+   `client.mjs` and `tools/comparator/src/driver.ts`.
+6. **NanCy's own plugin state was split across two separate in-process
+   instances in this exact deployment shape** (no `mainSessionKey`/
+   `workerAgentId` — NanCy's simplest, default documented mode): OpenClaw can
+   invoke a plugin's `register(api)` more than once for the same loaded
+   module, and `taskAuth`/session state/pending confirmations were all
+   created fresh inside `register()`'s own body, so a task granted via
+   `message_received` in one call was invisible to `before_tool_call` in
+   another — confirmed directly via a per-instance id and a monotonic
+   call-sequence counter, not timestamp inference. This was the last blocker:
+   every other fix above was necessary but not sufficient until this one
+   landed too. Fixed by keying that state at module level by `api.rootDir`
+   instead of recreating it per call (see `src/index.ts`); regression-tested
+   in `test/dual-registration.test.ts`.
 
-A2A's task model is request/response (`SendMessage` → completed task with an
-`artifacts[].parts[].text` reply). NanCy's confirmation dance is: agent sends
-a `"Formal confirmation: ...\nReply y to proceed..."` message and waits; the
-human's `"y"` arrives as a **separate** inbound message in the same session.
-Mapped onto A2A: your `SendMessage` call for the task blocks until the
-agent's confirmation question comes back as the completed task's reply text
-(the recommended default — see "Blocking vs. `returnImmediately`"); you then
-send a **second** `SendMessage` with the same `contextId` carrying `"y"`.
-
-Everything mechanical this depends on has now been directly observed working
-over a real A2A session (`sessionKey` stays identical across turns in the
-same `contextId`; `message_received`, `before_tool_call`, and `message_sending`
-all fire correctly and reach a real, non-erroring reviewer verdict). What has
-**not** been directly observed is the confirmation-request message itself
-getting a real ALLOW from the reviewer over A2A — every test scenario tried
-so far (e.g. "POST a string to an external URL via curl") was a plausible
-enough exfiltration shape that the reviewer reasonably BLOCKed/CLARIFYed the
-confirmation-request itself, before the "y" round trip was ever reached. That
-is very likely the reviewer doing its job correctly on a synthetic test
-description, not a mechanical gap — but it means the specific sequence
-`confirmation_requested` → (phone sends "y") → `confirmation_granted` is
-still unconfirmed by direct observation. A real, low-stakes, genuinely
-purposeful task description (not an invented one designed only to be
-harmless-looking) would be the next test, not further prompt-tuning against
-NanCy's own reviewer.
+With all six in place, a real run (`test/run-isolated-a2a-test.mts`) shows
+the complete intended chain for the first time:
+`blocked_no_confirmed_task` → the agent's own `"Formal confirmation: ..."` →
+`confirmation_requested` → `"y"` → `confirmation_granted` → the *next*
+`before_tool_call` for the same action now carries that `taskId` → a real
+reviewer verdict matching the confirmed task
+(`"The command directly matches the confirmed task ... does not violate any
+baseline security policies."`, dry-run only because `testMode: true`). The
+one thing this run doesn't cover: the agent's own follow-up narration to the
+user (not the gated action itself) got CLARIFY'd as outside the task's
+scope, because the test's task description authorized only the curl
+command, not reporting back on it — worth keeping in mind when writing a
+real task description, not a NanCy bug.
 
 ## Setup (config only — no plugin code)
 
@@ -237,10 +261,14 @@ Gateway's own port directly — confirmed necessary against a real phone, see
 
 ## Next steps
 
-- Drive a real, purposeful (not synthetic-benign) task through the full
-  confirmation dance over A2A — `confirmation_requested` → phone sends
-  `"y"` → `confirmation_granted` — and confirm the exact `nancy.log`
-  sequence, closing the one remaining item in "What's genuinely unverified."
+- Repeat the full confirmation dance from an actual phone (not just the
+  automated loopback test) with all six fixes in place, using the browser UI
+  and `test/start-manual-test-gateway.mts` — the mechanism is now proven
+  against a real model over a real A2A session; this would confirm the same
+  chain survives the LAN + same-origin-proxy path too.
+- Try a task description that also authorizes reporting back to the user
+  (not just the gated action itself), to see the agent's own follow-up reply
+  reach the human instead of getting CLARIFY'd as out of scope.
 - Only after that's confirmed does it make sense to invest in an actual
   native phone client instead of the browser page — this file's job was
   proving the transport and the confirmation-flow mapping, not building
