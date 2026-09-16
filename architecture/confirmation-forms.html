@@ -274,6 +274,39 @@ other — a form-collected <code>price_ceiling</code> would be exactly the kind 
 value <code>spend-policy.ts</code>&#39;s <code>SpendIntent.amount</code> could later be checked
 against, if both are ever built.</li>
 </ul>
+<h2 id="related-work-external--for-this-design-only-not-nancys-shipped-core">Related work (external — for this design only, not NanCy&#39;s shipped core)</h2>
+<p><code>RELATED-WORK.md</code> at the repo root covers prior art for NanCy&#39;s actual
+shipped mechanism (the stateless reviewer plus code-owned confirmed-task
+record) — deliberately kept separate from this section, which is prior art
+for the <em>form</em> idea specifically and should not be read as claims about
+anything already implemented.</p>
+<ul>
+<li><strong><a href="https://arxiv.org/pdf/2605.11360">&quot;Options, Not Clicks: Lattice Refinement for Consent-Driven MCP
+Authorization&quot;</a></strong> proposes replacing
+free-text or binary allow/deny authorization prompts with dynamically
+generated, bounded, hierarchical choices — aimed at the same &quot;consent
+fatigue&quot; problem this design exists to avoid. Its lattice organizes
+<em>how much access</em> a grant covers (deny-all → read-only → specific
+files); this design&#39;s authorization/specification field split instead
+organizes <em>which exact values</em> apply within one already-agreed action
+(a price, a payment method) — a different axis of the same underlying
+idea (structured, bounded choices over free text), not the same
+mechanism restated.</li>
+<li><strong>Slot filling in task-oriented dialogue systems</strong> (a decades-old NLP
+technique, now commonly done zero-shot with LLMs — e.g. the &quot;Zero-shot
+Slot Filling in the Age of LLMs for Dialogue Systems&quot; survey,
+<a href="https://aclanthology.org/2025.coling-industry.59.pdf">ACL Anthology</a>)
+is the general technique this design applies to the authorization
+domain specifically: extract structured fields (slots) from a
+free-text request, then confirm the filled result with the user before
+acting on it. Worth reading before implementing the generation prompt in
+<code>src/confirmation/form-generation.ts</code> (sketched above) — established
+confirmation strategies from that literature (re-prompt only the missing
+or invalid slots, not the whole form; distinguish &quot;confirm current
+values&quot; from &quot;confirm submission&quot;) likely transfer directly and are
+better prior art for the interaction design than reinventing it from
+scratch.</li>
+</ul>
 <h2 id="open-questions-before-this-could-ship">Open questions before this could ship</h2>
 <ul>
 <li>Where trusted option lists (payment methods, addresses) actually live —
@@ -298,7 +331,7 @@ naive schema-only validator wouldn&#39;t catch. Needs its own explicit test
 plan once implementation starts, not an afterthought.</li>
 </ul>
 
-<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit 3ead297. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
+<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit ec31b5a. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
 </main>
 </div>
 </body>
