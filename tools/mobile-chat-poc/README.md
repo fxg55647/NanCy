@@ -49,8 +49,14 @@ vaihtoehdot ensin" / "Tarkenna lomakkeella" / "Kuvaile tekstillä"). Only the
 first sends the literal `"y"` — the rest just compose an ordinary plain-text
 chat message for the target agent to read, exactly as if the human had
 typed it themselves, no special marker involved; none of them are consent
-on their own. `client.mjs` (the terminal client) has no renderer and just
-shows the `[NANCY_FORM]` block as raw text, same as Telegram would.
+on their own. "Selvitä vaihtoehdot ensin" opens a further choice between
+starting immediately (the form's suggested candidate count, no extra
+questions) and narrowing what to search for using the same fields as
+"Tarkenna lomakkeella" — deliberately without a free-text option there,
+since that path always carries an already-fixed "gather information only"
+framing that unconstrained text could quietly contradict. `client.mjs` (the
+terminal client) has no renderer and just shows the `[NANCY_FORM]` block as
+raw text, same as Telegram would.
 
 ## What broke, running this for real (and what it taught us)
 

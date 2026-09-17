@@ -419,7 +419,7 @@
       gatherBtn.textContent = "Selvitä vaihtoehdot ensin";
       gatherBtn.addEventListener("click", () => {
         disableAll();
-        bar.appendChild(renderGatherEditor(form, bar));
+        bar.appendChild(renderGatherChoiceBar(form, bar));
       });
       bar.appendChild(gatherBtn);
       buttons.push(gatherBtn);
@@ -452,15 +452,16 @@
     return bar;
   }
 
-  // The generated fields plus one always-present free-text field — the
-  // form's fixed purposes are only a starting point, not the only thing the
-  // human can say here.
-  function renderFormEditor(form, bar) {
-    const editor = document.createElement("div");
-    editor.className = "field-editor";
-    const values = {};
+  // Renders one input control per field into `container` (range/number/
+  // boolean/text), matching the field's `type` exactly as forms.ts's fixed
+  // purpose→type table produced it. Returns collect(), which reads current
+  // control values into a plain {fieldId: value} object — call it once on
+  // submit, not per keystroke. Shared by renderFormEditor (the top-level
+  // "Tarkenna lomakkeella") and renderGatherFormEditor (the "gather info
+  // first" narrowing form) so both stay in sync with any future field type.
+  function renderFieldInputs(fields, container) {
     const readers = [];
-    for (const field of form.fields) {
+    for (const field of fields) {
       const wrap = document.createElement("div");
       wrap.className = "field";
       const label = document.createElement("label");
@@ -484,36 +485,54 @@
         row.append(min, document.createTextNode("–"), max);
         wrap.appendChild(row);
         readers.push(() => {
-          if (min.value === "" || max.value === "") return;
+          if (min.value === "" || max.value === "") return null;
           const a = Number(min.value);
           const b = Number(max.value);
-          if (Number.isFinite(a) && Number.isFinite(b)) values[field.id] = a <= b ? { min: a, max: b } : { min: b, max: a };
+          if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+          return [field.id, a <= b ? { min: a, max: b } : { min: b, max: a }];
         });
       } else if (field.type === "number") {
         const input = document.createElement("input");
         input.type = "number";
         wrap.appendChild(input);
         readers.push(() => {
-          if (input.value === "") return;
+          if (input.value === "") return null;
           const n = Number(input.value);
-          if (Number.isFinite(n)) values[field.id] = n;
+          return Number.isFinite(n) ? [field.id, n] : null;
         });
       } else if (field.type === "boolean") {
         const input = document.createElement("input");
         input.type = "checkbox";
         wrap.appendChild(input);
-        readers.push(() => { values[field.id] = input.checked; });
+        readers.push(() => [field.id, input.checked]);
       } else {
         const input = document.createElement("input");
         input.type = "text";
         wrap.appendChild(input);
         readers.push(() => {
           const v = input.value.trim();
-          if (v) values[field.id] = v;
+          return v ? [field.id, v] : null;
         });
       }
-      editor.appendChild(wrap);
+      container.appendChild(wrap);
     }
+    return function collect() {
+      const values = {};
+      for (const read of readers) {
+        const entry = read();
+        if (entry) values[entry[0]] = entry[1];
+      }
+      return values;
+    };
+  }
+
+  // The generated fields plus one always-present free-text field — the
+  // form's fixed purposes are only a starting point, not the only thing the
+  // human can say here.
+  function renderFormEditor(form, bar) {
+    const editor = document.createElement("div");
+    editor.className = "field-editor";
+    const collect = renderFieldInputs(form.fields, editor);
 
     const extraWrap = document.createElement("div");
     extraWrap.className = "field";
@@ -531,7 +550,7 @@
     submitBtn.textContent = "Lähetä";
     submitBtn.addEventListener("click", () => {
       submitBtn.disabled = true;
-      for (const read of readers) read();
+      const values = collect();
       const parts = form.fields
         .filter((f) => Object.prototype.hasOwnProperty.call(values, f.id))
         .map((f) => `${f.label}: ${formatFieldValue(f, values[f.id])}`);
@@ -565,30 +584,74 @@
     return editor;
   }
 
-  function renderGatherEditor(form, bar) {
+  // "Selvitä vaihtoehdot ensin" never sends anything by itself — it opens a
+  // choice between starting immediately with the suggested default count
+  // (zero extra questions) and narrowing what to search for first using the
+  // SAME fields "Tarkenna lomakkeella" offers, just framed as search
+  // criteria for a gather-info request instead of limits for a final
+  // action. Deliberately no free-text option here, unlike renderFormEditor:
+  // this path always carries an already-fixed "gather information only,
+  // don't commit to anything" framing, and unconstrained text could quietly
+  // contradict or dilute that framing in a way a bounded field can't.
+  function renderGatherChoiceBar(form, bar) {
+    const editor = document.createElement("div");
+    editor.className = "field-editor response-bar";
+
+    const startBtn = document.createElement("button");
+    startBtn.type = "button";
+    startBtn.className = "submit-form";
+    startBtn.textContent = "Ala hakea";
+    const narrowBtn = document.createElement("button");
+    narrowBtn.type = "button";
+    narrowBtn.className = "submit-form secondary";
+    narrowBtn.textContent = "Rajaa lomakkeella mitä haetaan";
+    editor.append(startBtn, narrowBtn);
+
+    startBtn.addEventListener("click", () => {
+      startBtn.disabled = true;
+      narrowBtn.disabled = true;
+      const count = form.gatherFirstDefaultCount ?? 5;
+      const text = `Selvitä ensin enintään ${count} vaihtoehtoa ja esitä ne minulle, ennen kuin teet mitään lopullista.`;
+      sendPlainAndRender(text, `Selvitä vaihtoehdot ensin (enintään ${count})`, bar);
+    });
+
+    if (form.fields.length === 0) {
+      // Nothing to narrow with — hide the option rather than show an empty form.
+      narrowBtn.hidden = true;
+    } else {
+      narrowBtn.addEventListener("click", () => {
+        startBtn.disabled = true;
+        narrowBtn.disabled = true;
+        editor.appendChild(renderGatherFormEditor(form, bar));
+      });
+    }
+
+    return editor;
+  }
+
+  // Same field set and input types as "Tarkenna lomakkeella"
+  // (renderFieldInputs), but no free-text field — see renderGatherChoiceBar's
+  // comment — and the composed message is framed as search/gather criteria,
+  // never as limits for a final action.
+  function renderGatherFormEditor(form, bar) {
     const editor = document.createElement("div");
     editor.className = "field-editor";
-    const wrap = document.createElement("div");
-    wrap.className = "field";
-    const label = document.createElement("label");
-    label.textContent = "Kuinka monta vaihtoehtoa haluat vertailuun?";
-    wrap.appendChild(label);
-    const input = document.createElement("input");
-    input.type = "number";
-    input.min = "1";
-    input.value = String(form.gatherFirstDefaultCount ?? 5);
-    wrap.appendChild(input);
-    editor.appendChild(wrap);
+    const collect = renderFieldInputs(form.fields, editor);
+
     const submitBtn = document.createElement("button");
     submitBtn.type = "button";
     submitBtn.className = "submit-form";
     submitBtn.textContent = "Lähetä";
     submitBtn.addEventListener("click", () => {
       submitBtn.disabled = true;
-      const n = Number(input.value);
-      const count = Number.isFinite(n) && n > 0 ? Math.round(n) : (form.gatherFirstDefaultCount ?? 5);
-      const text = `Selvitä ensin enintään ${count} vaihtoehtoa ja esitä ne minulle, ennen kuin teet mitään lopullista.`;
-      sendPlainAndRender(text, `Selvitä vaihtoehdot ensin (enintään ${count})`, bar);
+      const values = collect();
+      const parts = form.fields
+        .filter((f) => Object.prototype.hasOwnProperty.call(values, f.id))
+        .map((f) => `${f.label}: ${formatFieldValue(f, values[f.id])}`);
+      const count = form.gatherFirstDefaultCount ?? 5;
+      const criteria = parts.length > 0 ? `\n${parts.join("\n")}` : "";
+      const text = `Selvitä ensin enintään ${count} vaihtoehtoa jotka täyttävät nämä kriteerit, äläkä tee mitään lopullista ennen kuin kysyt uudelleen:${criteria}`;
+      sendPlainAndRender(text, text, bar);
     });
     editor.appendChild(submitBtn);
     return editor;
