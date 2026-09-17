@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gather Results Format — NanCy SSIL</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1a1a1a; --muted: #5b6472; --border: #e2e5ea;
+  --accent: #7c3aed; --code-bg: #f4f4f7; --nav-bg: #fafafa;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14161c; --fg: #eef0f4; --muted: #9aa3b2; --border: #2a2e38;
+    --accent: #b794f6; --code-bg: #1c1f27; --nav-bg: #191b22;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); }
+.layout { display: flex; min-height: 100vh; }
+nav.sidebar { width: 260px; flex-shrink: 0; background: var(--nav-bg); border-right: 1px solid var(--border); padding: 24px 16px; }
+nav.sidebar h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 20px 0 6px; }
+nav.sidebar ul { list-style: none; margin: 0; padding: 0; }
+nav.sidebar li a { display: block; padding: 4px 8px; border-radius: 6px; text-decoration: none; color: var(--fg); font-size: 14px; }
+nav.sidebar li a[aria-current="page"] { background: var(--accent); color: #fff; }
+nav.sidebar li a:hover { background: var(--border); }
+.brand { font-weight: 700; font-size: 18px; margin-bottom: 4px; }
+.brand-sub { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+main { flex: 1; min-width: 0; padding: 40px clamp(16px, 5vw, 64px); max-width: 860px; }
+main h1:first-child { margin-top: 0; }
+pre { background: var(--code-bg); padding: 14px 16px; overflow-x: auto; border-radius: 8px; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; overflow-x: auto; display: block; }
+th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+blockquote { border-left: 3px solid var(--accent); margin: 0; padding: 0 16px; color: var(--muted); }
+img { max-width: 100%; }
+footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+#nav-toggle { display: none; }
+.nav-toggle-label { display: none; }
+@media (max-width: 800px) {
+  .layout { display: block; }
+  nav.sidebar { width: auto; border-right: none; border-bottom: 1px solid var(--border); }
+  #nav-toggle:not(:checked) ~ .layout nav.sidebar .nav-body { display: none; }
+  .nav-toggle-label { display: block; padding: 16px; cursor: pointer; font-weight: 600; }
+}
+</style>
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="layout">
+<nav class="sidebar">
+<label class="nav-toggle-label" for="nav-toggle">☰ Docs menu</label>
+<div class="nav-body">
+<div class="brand">NanCy SSIL</div>
+<div class="brand-sub"><a href="https://github.com/fxg55647/NanCy">GitHub ↗</a></div>
+<div class="nav-group"><h2>Overview</h2><ul><li><a href="../index.html">NanCy SSIL</a></li><li><a href="../claude.html">CLAUDE</a></li><li><a href="../how-agents-go-wrong.html">HOW AGENTS GO WRONG</a></li><li><a href="../incidents.html">INCIDENTS</a></li><li><a href="../misconceptions.html">MISCONCEPTIONS</a></li><li><a href="../nancy-policy.html">NANCY POLICY</a></li><li><a href="../related-work.html">RELATED WORK</a></li><li><a href="../security-philosophy.html">SECURITY PHILOSOPHY</a></li><li><a href="../testing.html">TESTING</a></li></ul></div><div class="nav-group"><h2>Docs</h2><ul><li><a href="../mobile-app-todo.html">Mobile App Todo</a></li></ul></div><div class="nav-group"><h2>Architecture</h2><ul><li><a href="arweave-integrity-anchoring.html">Arweave Integrity Anchoring</a></li><li><a href="behavior-comparator.html">Behavior Comparator</a></li><li><a href="confirmation-forms.html">Confirmation Forms</a></li><li><a href="debate-review.html">Debate Review</a></li><li><a href="denial-escalation-and-clarification.html">Denial Escalation And Clarification</a></li><li><a href="gap-detection.html">Gap Detection</a></li><li><a href="gather-results-format.html" aria-current="page">Gather Results Format</a></li><li><a href="policy-precedence.html">Policy Precedence</a></li><li><a href="task-confirmation-menu.html">Task Confirmation Menu</a></li></ul></div><div class="nav-group"><h2>Audits</h2><ul><li><a href="../audits/2026-09-14-security-review.html">2026 09 14 Security Review</a></li></ul></div>
+</div>
+</nav>
+<main>
+<h1 id="reporting-gathered-options-back--the-nancy_results-convention">Reporting Gathered Options Back — the <code>[NANCY_RESULTS]</code> Convention</h1>
+<p>Status: <strong>implemented as a documented convention only — zero NanCy code.</strong>
+This is the direct follow-on to <code>docs/architecture/confirmation-forms.md</code>&#39;s
+<code>offersGatherFirst</code> flag: once a human has asked the target agent to
+&quot;gather options first&quot; (task-confirmation-menu.md&#39;s option 5), the agent
+eventually needs to report back what it found — today that&#39;s just prose
+text. This doc defines an optional convention the agent <em>may</em> use instead,
+so a rendering client (<code>tools/mobile-chat-poc/web/index.html</code>) can show a
+proper list/card view rather than one wall of text.</p>
+<h2 id="the-one-thing-to-understand-before-touching-this">The one thing to understand before touching this</h2>
+<p><strong>This is not <code>GeneratedForm</code>.</strong> <code>GeneratedForm</code> (<code>src/confirmation/forms.ts</code>)
+is NanCy&#39;s own trusted output, generated at confirmation time, because its
+fields can be <em>authorization-bearing</em> (a price ceiling defines what&#39;s
+authorized to spend) — that&#39;s why NanCy&#39;s own code generates and
+mechanically constrains it.</p>
+<p>The block this doc defines is different in kind: it carries <strong>search
+results about the world</strong> (which laptops exist, what they cost) — never
+anything that expands or narrows what the worker is authorized to do. It
+is authored entirely by the <strong>target agent</strong>, at whatever point in its own
+task execution it has something to report, using whatever tool results it
+already gathered. NanCy&#39;s <code>message_sending</code> hook reviews the surrounding
+outbound message exactly as it reviews any other outbound content — it does
+not need to recognize, generate, or validate this block at all. <strong>Do not
+add NanCy-side parsing, generation, or validation for this convention</strong> —
+that would be solving a problem this design deliberately doesn&#39;t have.</p>
+<h2 id="the-convention">The convention</h2>
+<p>Anywhere in an ordinary outbound message, the agent may include:</p>
+<pre><code>[NANCY_RESULTS]{&quot;items&quot;:[{...arbitrary keys...}, {...}, ...]}[/NANCY_RESULTS]
+</code></pre>
+<ul>
+<li><code>items</code> is a JSON array of objects. Each object&#39;s keys are <strong>not fixed</strong>
+— the model may improvise per call, and even per item, since nothing here
+needs to be mechanically constrained the way <code>GeneratedForm</code> fields do.</li>
+<li>For a nicer comparison view, common field names are suggested (not
+required): <code>name</code>, <code>price</code>, <code>url</code>, <code>specs</code>, <code>note</code>. A rendering client
+must work correctly even if none of these appear, or if they vary from
+item to item.</li>
+<li>The block is optional and additive — the agent&#39;s own prose report should
+still make sense without it (write the human-readable summary as usual;
+the block is extra structure alongside it, the same relationship
+<code>[NANCY_FORM]</code> has to <code>buildFormAndMenuNote</code>&#39;s plain text).</li>
+<li>README.md&#39;s AGENTS.md snippet mentions this convention so the agent knows
+it exists; using it is always optional.</li>
+</ul>
+<h2 id="rendering-client-side-only-no-transport-change">Rendering (client-side only, no transport change)</h2>
+<p><code>tools/mobile-chat-poc/web/index.html</code>:</p>
+<ul>
+<li><code>extractResultsBlock(text)</code> — the same defensive-extraction shape as
+<code>extractFormBlock</code>: regex-match the delimiters, <code>JSON.parse</code> the inside,
+require an <code>items</code> array of objects. Any failure (block absent,
+malformed JSON, wrong shape) returns <code>items: null</code> and leaves the raw
+text to display normally — the same fail-open posture <code>[NANCY_FORM]</code>
+already established. A malformed block must never hide or break display
+of the surrounding message.</li>
+<li><code>renderResultsView(items)</code> renders a small &quot;Listana ⇄ Lomakkeena&quot; toggle:<ul>
+<li><strong>Listana</strong>: one line per item, its own keys/values joined as text.</li>
+<li><strong>Lomakkeena</strong>: one card per item, each key rendered as a generic
+label/value pair (no assumed schema, since keys aren&#39;t known ahead of
+time).</li>
+</ul>
+</li>
+<li>Every item value is untrusted content — it came from pages the agent
+visited, which could include adversarial text. Render with <code>textContent</code>
+only, exactly like <code>[NANCY_FORM]</code> field labels/values already do — never
+<code>innerHTML</code>.</li>
+<li>Channels that don&#39;t render this (Telegram, <code>client.mjs</code>) simply show the
+raw <code>[NANCY_RESULTS]{...}</code> text, same as any unrecognized content.</li>
+</ul>
+<h2 id="relationship-to-existing-work">Relationship to existing work</h2>
+<ul>
+<li><strong><code>confirmation-forms.md</code></strong>&#39;s <code>offersGatherFirst</code>/<code>gatherFirstDefaultCount</code>
+is what prompts the <em>narrower first confirmation</em> that leads to the
+agent doing this gathering in the first place — this doc only covers what
+happens once the agent has something to report back.</li>
+<li><strong><code>task-confirmation-menu.md</code></strong>&#39;s option 5 finding holds exactly as
+predicted: NanCy never becomes an active, tool-calling, or
+content-generating participant here. The target agent runs its own
+confirmed (narrower) task and reports back through its own ordinary
+outbound message; NanCy&#39;s only role is the same Intent Anchoring review
+every outbound message already gets.</li>
+</ul>
+
+<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit e968ee2. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
+</main>
+</div>
+</body>
+</html>

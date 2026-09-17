@@ -55,19 +55,66 @@ footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border
 <div class="nav-body">
 <div class="brand">NanCy SSIL</div>
 <div class="brand-sub"><a href="https://github.com/fxg55647/NanCy">GitHub ↗</a></div>
-<div class="nav-group"><h2>Overview</h2><ul><li><a href="../index.html">NanCy SSIL</a></li><li><a href="../claude.html">CLAUDE</a></li><li><a href="../how-agents-go-wrong.html">HOW AGENTS GO WRONG</a></li><li><a href="../incidents.html">INCIDENTS</a></li><li><a href="../misconceptions.html">MISCONCEPTIONS</a></li><li><a href="../nancy-policy.html">NANCY POLICY</a></li><li><a href="../related-work.html">RELATED WORK</a></li><li><a href="../security-philosophy.html">SECURITY PHILOSOPHY</a></li><li><a href="../testing.html">TESTING</a></li></ul></div><div class="nav-group"><h2>Docs</h2><ul><li><a href="../mobile-app-todo.html">Mobile App Todo</a></li></ul></div><div class="nav-group"><h2>Architecture</h2><ul><li><a href="arweave-integrity-anchoring.html">Arweave Integrity Anchoring</a></li><li><a href="behavior-comparator.html">Behavior Comparator</a></li><li><a href="confirmation-forms.html" aria-current="page">Confirmation Forms</a></li><li><a href="debate-review.html">Debate Review</a></li><li><a href="denial-escalation-and-clarification.html">Denial Escalation And Clarification</a></li><li><a href="gap-detection.html">Gap Detection</a></li><li><a href="policy-precedence.html">Policy Precedence</a></li><li><a href="task-confirmation-menu.html">Task Confirmation Menu</a></li></ul></div><div class="nav-group"><h2>Audits</h2><ul><li><a href="../audits/2026-09-14-security-review.html">2026 09 14 Security Review</a></li></ul></div>
+<div class="nav-group"><h2>Overview</h2><ul><li><a href="../index.html">NanCy SSIL</a></li><li><a href="../claude.html">CLAUDE</a></li><li><a href="../how-agents-go-wrong.html">HOW AGENTS GO WRONG</a></li><li><a href="../incidents.html">INCIDENTS</a></li><li><a href="../misconceptions.html">MISCONCEPTIONS</a></li><li><a href="../nancy-policy.html">NANCY POLICY</a></li><li><a href="../related-work.html">RELATED WORK</a></li><li><a href="../security-philosophy.html">SECURITY PHILOSOPHY</a></li><li><a href="../testing.html">TESTING</a></li></ul></div><div class="nav-group"><h2>Docs</h2><ul><li><a href="../mobile-app-todo.html">Mobile App Todo</a></li></ul></div><div class="nav-group"><h2>Architecture</h2><ul><li><a href="arweave-integrity-anchoring.html">Arweave Integrity Anchoring</a></li><li><a href="behavior-comparator.html">Behavior Comparator</a></li><li><a href="confirmation-forms.html" aria-current="page">Confirmation Forms</a></li><li><a href="debate-review.html">Debate Review</a></li><li><a href="denial-escalation-and-clarification.html">Denial Escalation And Clarification</a></li><li><a href="gap-detection.html">Gap Detection</a></li><li><a href="gather-results-format.html">Gather Results Format</a></li><li><a href="policy-precedence.html">Policy Precedence</a></li><li><a href="task-confirmation-menu.html">Task Confirmation Menu</a></li></ul></div><div class="nav-group"><h2>Audits</h2><ul><li><a href="../audits/2026-09-14-security-review.html">2026 09 14 Security Review</a></li></ul></div>
 </div>
 </nav>
 <main>
 <h1 id="nancy-generated-confirmation-forms">NanCy-Generated Confirmation Forms</h1>
-<p>Status: <strong>design only, not implemented.</strong> This is a preliminary design record
-for a feature discussed while building <code>tools/mobile-chat-poc/</code>, not yet
-started in code. Read it before implementing anything under
-<code>src/confirmation/</code> or <code>tools/mobile-chat-poc/web/</code> named &quot;form&quot; — the goal
-is to keep the eventual implementation consistent with the security
-invariants below rather than improvising them at build time. See
-<code>docs/mobile-app-todo.md</code>&#39;s P0 &quot;Kysymykset ja lomakkeet&quot; checklist, which
-this design record exists to make concrete.</p>
+<p>Status: <strong>v1 implemented</strong> in <code>src/confirmation/forms.ts</code>, wired into
+<code>message_sending</code>/<code>message_received</code> in <code>src/index.ts</code>, and rendered by
+<code>tools/mobile-chat-poc/web/index.html</code>. This is a deliberate scope cut from
+the design below, decided when implementation started:</p>
+<ul>
+<li><strong>Only number/range/text/boolean field types.</strong> No select/multiselect
+authorization fields, and therefore no trusted-config option-list source
+either — this sidesteps &quot;Where trusted option lists would come from&quot;
+(still open, still undecided) entirely, since every v1 <code>FieldPurpose</code>
+resolves to one of those four plain types by a fixed lookup table, never
+the model&#39;s own choice. The two motivating examples (a price range, a
+time range) are both numeric spans, not enumerated choices, so this
+covers the cases that prompted the feature.</li>
+<li>A field&#39;s <code>purpose</code> is the only thing the model proposes; <code>kind</code> <em>and</em>
+<code>type</code> are both derived from it via a fixed table in <code>forms.ts</code> — a
+stricter mechanical backstop than the sketch below, where a field carried
+its own <code>type</code>.</li>
+<li><strong>The form (and the response-mode menu next to it) is purely
+presentational — none of it is a way to grant a task.</strong> This is stricter
+than the &quot;Delivery and submission&quot; sketch below, which floated a
+structured <code>{confirmationId, values}</code> submission as a second affirmative
+step of its own. In practice that still meant <em>something other than a
+literal &quot;y&quot; reply</em> could authorize a task, which reintroduced exactly the
+asymmetry-between-channels problem this feature was supposed to avoid
+(a rendering client&#39;s &quot;submit&quot; tap would count, but the identical values
+typed as plain text on Telegram needed its own separate parser to count
+the same way). v1 instead keeps the <em>entire</em> consent mechanism exactly as
+it was before this feature existed: only <code>isAffirmativeReply</code> in
+<code>message_received</code> ever grants anything, unchanged, on every channel
+alike. Filling in the form, describing something in free text, or asking
+to gather options first are all just ways to give the target agent more
+to work with; the agent (per the README.md AGENTS.md snippet, updated
+alongside this feature) is expected to read that and propose a <strong>fresh</strong>
+confirmation — its own free-text template, reviewed like any other — for
+the human to actually approve with a real &quot;y&quot;. This is genuinely
+zero-NanCy-code for every response mode except generating and presenting
+the form itself — see task-confirmation-menu.md&#39;s finding, which now
+applies without the one exception it originally needed.</li>
+<li>Whether &quot;gather options first&quot; (task-confirmation-menu.md&#39;s option 5)
+plausibly applies to this task at all is its own boolean
+(<code>GeneratedForm.offersGatherFirst</code>), decided by the same generation call —
+a task with nothing to look up (e.g. &quot;send this exact email&quot;) doesn&#39;t
+offer it. This can be true even with zero typed fields.</li>
+<li>Telegram (or any channel not listed in <code>confirmationForms.renderChannels</code>,
+default <code>[&quot;a2a&quot;]</code>) never receives the machine-readable <code>[NANCY_FORM]</code>
+block — only the always-safe plain-text field list and menu, which spells
+out explicitly that only &quot;y&quot; is consent (a text-only channel has no
+buttons to make that obvious the way the mobile UI&#39;s button layout does).</li>
+<li>The whole feature is <code>confirmationForms.enabled</code> (default true),
+independent of <code>gapDetection</code>&#39;s own switch.</li>
+</ul>
+<p>Everything below this line is the <strong>original design sketch</strong>, kept for the
+reasoning and for what&#39;s still open (multi-step forms, editing a granted
+task&#39;s fields, the trusted-option-list question for a future select/multiselect
+version) — read it for context, not as a description of what shipped.</p>
 <h2 id="why-this-exists">Why this exists</h2>
 <p><code>src/confirmation/gap-detection.ts</code> (feature #2&#39;s other half) already finds
 the problem this solves: a proposal like &quot;Buy a laptop for the office&quot; is a
@@ -331,7 +378,7 @@ naive schema-only validator wouldn&#39;t catch. Needs its own explicit test
 plan once implementation starts, not an afterthought.</li>
 </ul>
 
-<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit 4b2d727. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
+<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit e968ee2. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
 </main>
 </div>
 </body>

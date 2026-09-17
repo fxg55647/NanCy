@@ -55,12 +55,29 @@ footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border
 <div class="nav-body">
 <div class="brand">NanCy SSIL</div>
 <div class="brand-sub"><a href="https://github.com/fxg55647/NanCy">GitHub ↗</a></div>
-<div class="nav-group"><h2>Overview</h2><ul><li><a href="../index.html">NanCy SSIL</a></li><li><a href="../claude.html">CLAUDE</a></li><li><a href="../how-agents-go-wrong.html">HOW AGENTS GO WRONG</a></li><li><a href="../incidents.html">INCIDENTS</a></li><li><a href="../misconceptions.html">MISCONCEPTIONS</a></li><li><a href="../nancy-policy.html">NANCY POLICY</a></li><li><a href="../related-work.html">RELATED WORK</a></li><li><a href="../security-philosophy.html">SECURITY PHILOSOPHY</a></li><li><a href="../testing.html">TESTING</a></li></ul></div><div class="nav-group"><h2>Docs</h2><ul><li><a href="../mobile-app-todo.html">Mobile App Todo</a></li></ul></div><div class="nav-group"><h2>Architecture</h2><ul><li><a href="arweave-integrity-anchoring.html">Arweave Integrity Anchoring</a></li><li><a href="behavior-comparator.html">Behavior Comparator</a></li><li><a href="confirmation-forms.html">Confirmation Forms</a></li><li><a href="debate-review.html">Debate Review</a></li><li><a href="denial-escalation-and-clarification.html">Denial Escalation And Clarification</a></li><li><a href="gap-detection.html">Gap Detection</a></li><li><a href="policy-precedence.html">Policy Precedence</a></li><li><a href="task-confirmation-menu.html" aria-current="page">Task Confirmation Menu</a></li></ul></div><div class="nav-group"><h2>Audits</h2><ul><li><a href="../audits/2026-09-14-security-review.html">2026 09 14 Security Review</a></li></ul></div>
+<div class="nav-group"><h2>Overview</h2><ul><li><a href="../index.html">NanCy SSIL</a></li><li><a href="../claude.html">CLAUDE</a></li><li><a href="../how-agents-go-wrong.html">HOW AGENTS GO WRONG</a></li><li><a href="../incidents.html">INCIDENTS</a></li><li><a href="../misconceptions.html">MISCONCEPTIONS</a></li><li><a href="../nancy-policy.html">NANCY POLICY</a></li><li><a href="../related-work.html">RELATED WORK</a></li><li><a href="../security-philosophy.html">SECURITY PHILOSOPHY</a></li><li><a href="../testing.html">TESTING</a></li></ul></div><div class="nav-group"><h2>Docs</h2><ul><li><a href="../mobile-app-todo.html">Mobile App Todo</a></li></ul></div><div class="nav-group"><h2>Architecture</h2><ul><li><a href="arweave-integrity-anchoring.html">Arweave Integrity Anchoring</a></li><li><a href="behavior-comparator.html">Behavior Comparator</a></li><li><a href="confirmation-forms.html">Confirmation Forms</a></li><li><a href="debate-review.html">Debate Review</a></li><li><a href="denial-escalation-and-clarification.html">Denial Escalation And Clarification</a></li><li><a href="gap-detection.html">Gap Detection</a></li><li><a href="gather-results-format.html">Gather Results Format</a></li><li><a href="policy-precedence.html">Policy Precedence</a></li><li><a href="task-confirmation-menu.html" aria-current="page">Task Confirmation Menu</a></li></ul></div><div class="nav-group"><h2>Audits</h2><ul><li><a href="../audits/2026-09-14-security-review.html">2026 09 14 Security Review</a></li></ul></div>
 </div>
 </nav>
 <main>
 <h1 id="task-confirmation-a-menu-of-response-modes-design-discussion">Task Confirmation: a menu of response modes (design discussion)</h1>
-<p>Status: <strong>design discussion, not implemented.</strong> Captures the reasoning from a brainstorm session, not a committed spec like Part C in <a href="denial-escalation-and-clarification.html"><code>denial-escalation-and-clarification.md</code></a> — read that doc first for the Clarify Mode design this one builds on.</p>
+<p>Status: <strong>option 3 (the form) is now implemented, presentationally</strong> — see
+<a href="confirmation-forms.html"><code>confirmation-forms.md</code></a>&#39;s &quot;v1 implemented&quot; status
+line for the actual shape. The menu below is now genuinely presented to the
+user (<code>buildFormAndMenuNote</code>/<code>buildFormDataBlock</code> in
+<code>src/confirmation/forms.ts</code>) whenever a form is generated. This doc&#39;s key
+finding held even more strongly than predicted: it turned out <strong>all four</strong>
+of options 1, 3, 4, and 5 need zero NanCy code, including the form — a
+reply that isn&#39;t a literal &quot;y&quot; is simply left as an ordinary denial
+(<code>src/index.ts</code>&#39;s <code>message_received</code>, completely unchanged by this
+feature), which flows to the target agent as normal conversation for it to
+turn into a fresh confirmation; only the AGENTS.md snippet in README.md was
+extended so the agent reacts to that sensibly. (An earlier draft of the
+implementation gave option 3 its own structured-submission grant path as a
+second way to say &quot;yes&quot; — dropped before shipping, precisely because it
+broke the &quot;one rule, every channel&quot; property the other three options keep.)
+Option 2 (&quot;always confirm when needed&quot;) remains unimplemented, per Part C of
+<a href="denial-escalation-and-clarification.html"><code>denial-escalation-and-clarification.md</code></a>
+— read that doc first for the Clarify Mode design this one builds on.</p>
 <h2 id="the-idea">The idea</h2>
 <p>Today&#39;s confirmation protocol has exactly one interactive decision: the agent sends a <code>Formal confirmation: ...</code>, and the user replies <code>y</code> (proceed) or anything else (cancel) — see <a href="../index.html#3-add-task-confirmation-rules-to-your-agent">README&#39;s Task Confirmation section</a>. This works well but is binary: either fully autonomous after one &quot;y,&quot; or nothing happens.</p>
 <p>The idea explored here: when the agent sends its confirmation, it could present the user with several different response modes rather than a bare y/n, letting the user choose how much oversight they want for this specific task — decided once, at the same point where the task itself is confirmed, not as a separate global setting.</p>
@@ -90,7 +107,7 @@ footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border
 <li>Interaction between option 5&#39;s &quot;narrow first confirmation&quot; and the &quot;state the outcome, not a procedure&quot; guidance now in README&#39;s Task Confirmation section (see <code>docs/architecture/behavior-comparator.md</code>&#39;s &quot;A NanCy-specific concept briefly leaked...&quot; and &quot;Stop writing unverifiable procedural conditions&quot; findings, tracked in commit <code>8dc6903</code>). Option 5 is fine specifically because the split into two confirmations is an explicit user choice realized as two separate real, independently-verifiable confirmations — not one confirmation&#39;s description silently promising an unverifiable multi-step condition, which is the thing that fix was about.</li>
 </ul>
 
-<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit 4b2d727. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
+<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit e968ee2. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
 </main>
 </div>
 </body>
