@@ -176,6 +176,19 @@ At minimum, every successfully completed consequential action needs a stable ope
 
 This ledger is a release condition for general clarification mode, not an optional later improvement.
 
+### Proposed improvement: structured per-item tracking (a "bucket list") for multi-item tasks
+
+**Status: proposed in discussion, not designed in detail, not implemented.** A concrete shape for the ledger above, for the specific and common case of one confirmed task covering several independently-completable items — "buy these 5 spare parts," "send these 3 invoices," "book these 2 appointments." Worth deciding on before building the general ledger, since it may be the more useful unit to track in practice, not just an optional refinement.
+
+The idea has four pieces:
+
+1. **Item extraction at grant time.** When a task is confirmed, one additional LLM call (same fail-open pattern as `src/confirmation/forms.ts`'s field generation — a failure or empty result never blocks or alters granting the task) proposes whether the description decomposes into discrete items and, if so, a bounded list of short canonical labels for them. A task that isn't naturally multi-item yields an empty or single-item list, and the mechanism is then a no-op.
+2. **Mutable per-task item state.** This is the one real structural departure: confirmed-task records are currently write-once (`writeFileSync(..., { flag: "wx" })` in `message_received` — deliberately fails if the file already exists). Tracking which items are done requires genuinely mutable per-task state for the first time. The concurrency-safe shape already exists in this codebase as of the dual-plugin-instance fix (`src/index.ts`'s `getOrCreateShared`/root-keyed `Map` pattern) — a `Map<taskId, Set<completedItemLabel>>` alongside `taskAuth` would inherit the same single-source-of-truth guarantee. This should be treated as a deliberate, acknowledged departure from "task record is an immutable audit entry," not folded in silently.
+3. **Matching a tool call to an item.** `before_tool_call` seeing e.g. a `buy_product` call for "Dell XPS replacement keyboard, part #1234" has to decide which bucket-list item ("keyboard") it fulfills, if any — real-world call parameters won't usually match the list's wording exactly. This step stays probabilistic (LLM-assisted, likely a narrow single-purpose prompt in the style of `metadataPreflightPrompt` rather than folded into the main verdict call) — matching isn't where the safety property comes from.
+4. **The actual deterministic backstop.** Once a call is matched to an item, whether that item is already marked done is a plain lookup, checked after the item is confirmed complete via `after_tool_call` (a real recorded outcome, not just an attempted call — the same trigger point the general ledger above already specifies). **A call matched to an already-completed item is hard-blocked regardless of what the main reviewer verdict says** — the same "LLM judgment plus a deterministic rule that can override it" shape used elsewhere in this codebase (`unconfirmedInfoLookupLimitPerHour` backing `allowUnconfirmedInfoLookups`, Domain Border Control running independently of the semantic reviewer). This is the piece that actually closes the duplicate-purchase gap; steps 1-3 only get a call in front of it to check.
+
+A secondary benefit if this is ever built: the same per-task item list is a natural thing to surface as progress in a client that can render it (e.g. `tools/mobile-chat-poc/web/`) — "3/5 varaosaa ostettu" — though that's a UI convenience, not something this proposal depends on.
+
 ## Configuration proposal
 
 Deterministic limits stay outside the reviewer connection settings:
