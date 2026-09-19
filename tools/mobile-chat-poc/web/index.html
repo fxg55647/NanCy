@@ -781,6 +781,24 @@
     return text || `[ei vastaustekstiä — tila: ${task?.status?.state ?? "tuntematon"}]`;
   }
 
+  // Mirrors client.mjs's pollUntilSettled — SendMessage can come back with
+  // TASK_STATE_WORKING (the turn takes longer than the server's internal
+  // blocking wait, e.g. NanCy's gap-detection/form-generation calls on top
+  // of the agent's own turn), and without polling to a settled state the
+  // page shows a placeholder "[ei vastaustekstiä]" forever AND task.contextId
+  // is never observed, silently breaking session continuity for every turn
+  // after that one too.
+  async function pollUntilSettled(url, token, taskId, timeoutMs = 30000) {
+    const deadline = Date.now() + timeoutMs;
+    const settled = new Set(["TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_REJECTED"]);
+    for (;;) {
+      const result = await callJsonRpc(url, token, "GetTask", { id: taskId });
+      const task = result?.task;
+      if (!task || settled.has(task.status?.state) || Date.now() > deadline) return task ?? null;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+
   async function callJsonRpc(url, token, method, params) {
     const res = await fetch(url, {
       method: "POST",
@@ -807,14 +825,22 @@
     const token = tokenInput.value.trim();
     if (!url || !token) throw new Error("Täytä ensin A2A-osoite ja token asetuksista.");
 
-    const params = {
-      message: { messageId: uuid(), role: "ROLE_USER", parts: [{ text }] },
-    };
-    if (contextId) params.contextId = contextId;
+    const message = { messageId: uuid(), role: "ROLE_USER", parts: [{ text }] };
+    // contextId belongs on the message object itself, per OpenClaw's own
+    // A2aSendMessageParamsSchema (see client.mjs's sendMessage, which has
+    // the same fix) — a top-level params.contextId is silently ignored, so
+    // the server mints a fresh ctx-<uuid> on every turn and multi-turn
+    // continuity never actually engages, even though it looks like it
+    // should from this file alone.
+    if (contextId) message.contextId = contextId;
+    const params = { message };
 
     const result = await callJsonRpc(url, token, "SendMessage", params);
-    const task = result?.task;
+    let task = result?.task;
     if (!task) throw new Error("Vastauksessa ei ollut task-kenttää.");
+    if (task.status?.state === "TASK_STATE_WORKING") {
+      task = (await pollUntilSettled(url, token, task.id)) ?? task;
+    }
     if (task.contextId) {
       contextId = task.contextId;
       saveSettings({ contextId });
