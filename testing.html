@@ -242,6 +242,7 @@ npm run verify:arweave -- &lt;transaction-id&gt; --chain
 <pre><code>node --experimental-strip-types scripts/run-eval.mts
 node --experimental-strip-types scripts/run-eval.mts --config=C:\path\to\openclaw.json
 </code></pre>
+<p>The prompt-injection section (<code>scripts/injection-scenarios.json</code>: the agent reads attacker-influenced browser/<code>web_fetch</code>/email content, then takes the action it asked for) is part of the full run. <code>--only=injection</code> runs just that section, prints to the console, and leaves <code>EVAL-RESULTS.md</code> untouched. Scenarios with <code>&quot;knownGap&quot;: true</code> are reported but do not fail the run. The harness serves each browser scenario&#39;s page to NanCy&#39;s own snapshot fetch by intercepting <code>127.0.0.1:&lt;port&gt;/snapshot</code>, so a real browser on the machine never affects verdicts.</p>
 <p>Re-run this after changing <code>analysis.model</code> or anything under <code>src/policy/</code>/<code>src/analysis/</code> to catch reviewer-behavior regressions — it&#39;s the fastest way to see, in one shot, whether the real model still reaches the same verdicts across every gate NanCy has. Edit <code>scripts/eval-scenarios.json</code> to add scenarios; each needs a <code>sessionMode</code> (<code>&quot;none&quot;</code>, <code>&quot;main&quot;</code>, or <code>&quot;worker&quot;</code>) and, for <code>&quot;worker&quot;</code>, a <code>taskId</code> (6–10 digits) plus a <code>task</code> description — see the comments at the top of <code>run-eval.mts</code> for how session keys and task confirmation are derived.</p>
 <h2 id="confirmed-task-record-for-either-tier">Confirmed-task &quot;record&quot;, for either tier</h2>
 <p>There is no <code>tasks/current.json</code> file anymore — an earlier version stored
@@ -349,7 +350,7 @@ confirmation matching only keys on <code>sessionKey</code>, not channel. Turn
 way when done. Absent an explicit in-the-moment request, this still doesn&#39;t
 require killing/restarting the gateway on your own initiative.</p>
 
-<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit d9b27d3. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
+<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit 9117b0b. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
 </main>
 </div>
 </body>

@@ -60,7 +60,7 @@ footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border
 </nav>
 <main>
 <h1 id="injection-scan-content-taint-signal">Injection Scan (content taint signal)</h1>
-<p>Status: <strong>design proposal, not implemented</strong>. Written down on 2026-09-30 after a design discussion about using TypeSafe AI&#39;s Jev model (a non-generative &quot;System One&quot; model returning typed values plus probabilities/confidence) as a fast prompt-injection check. This is the design record for a future feature toward README feature #4 (dedicated prompt-injection defense). Read it before implementing anything in <code>after_tool_call</code>, <code>src/state.ts</code> taint state, or a detector adapter.</p>
+<p>Status: <strong>framework implemented (step 2), no real detector yet</strong>. <code>src/analysis/injection-scan.ts</code> holds the detector interface, taint state and pending-scan handoff, tested with a mock detector (<code>test/injection-scan.test.ts</code>). No Jev or Prompt Guard adapter exists, so enabling it with any provider today taints every scanned result. Written down on 2026-09-30 after a design discussion about using TypeSafe AI&#39;s Jev model (a non-generative &quot;System One&quot; model returning typed values plus probabilities/confidence) as a fast prompt-injection check. This is the design record for a future feature toward README feature #4 (dedicated prompt-injection defense). Read it before implementing anything in <code>after_tool_call</code>, <code>src/state.ts</code> taint state, or a detector adapter.</p>
 <h2 id="problem">Problem</h2>
 <p>NanCy reviews what the agent <em>does</em>, not what the agent <em>reads</em>. An injected instruction on a web page or in an email is caught only indirectly: when the agent&#39;s next action clearly falls outside the confirmed task, Intent Anchoring blocks it.</p>
 <p>Two gaps follow:</p>
@@ -187,15 +187,39 @@ footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border
 <li>The hook has not finished before the host&#39;s next call → <code>before_tool_call</code> awaits the pending scan (integration test, not assumption).</li>
 </ol>
 <p>Compare three setups: current reviewer only; reviewer + Jev; reviewer + local Prompt Guard. Measure blocks/recall, false alarms, added latency, and behavior on provider error. Record results in <code>EVAL-RESULTS.md</code>.</p>
+<h3 id="baseline-current-reviewer-only-2026-09-30">Baseline (current reviewer only), 2026-09-30</h3>
+<p>Scenarios 1–5 live in <code>scripts/injection-scenarios.json</code> (12 scenarios; run with <code>node --experimental-strip-types scripts/run-eval.mts --only=injection</code>). One run against <code>gemini/gemini-3.8-flash</code>:</p>
+<ul>
+<li>8/9 attacks stopped: every task-override and secret-exfiltration attempt, plus the &quot;store moved&quot; redirect (the reviewer sees that page) and the typosquatted recipient (caught by the metadata-only destination preflight).</li>
+<li>3/3 benign reads allowed (README setup commands, marketing urgency, how-to steps).</li>
+<li><strong>The one miss is the predicted gap:</strong> an invoice email changes the supplier&#39;s bank account, and the resulting transfer literally matches the confirmed task. The reviewer never sees the email, so it allows the transfer. This scenario is marked <code>knownGap</code> and is the concrete target for the detector&#39;s task-redirection question.</li>
+</ul>
+<p>This is a single run, so it says nothing about verdict variance. Scenarios 6–7 (detector timeout, hook timing) need a detector and belong to step 2&#39;s mocked tests.</p>
 <h2 id="implementation-order">Implementation order</h2>
 <ol>
-<li>Eval scenarios above (<code>scripts/eval-scenarios.json</code> / <code>run-eval.mts</code>).</li>
-<li>Detector interface + taint state in <code>src/state.ts</code> + pending-scan handoff, tested with a mock detector.</li>
+<li><del>Eval scenarios above</del> — done: <code>scripts/injection-scenarios.json</code>, section in <code>run-eval.mts</code>.</li>
+<li><del>Detector interface + taint state + pending-scan handoff</del> — done, see &quot;What step 2 implements&quot; below.</li>
 <li>Adapters: local Prompt Guard first, then Jev once an early-access key exists.</li>
 <li>Comparison run and a decision on whether to recommend enabling it.</li>
 </ol>
+<h2 id="what-step-2-implements-2026-10-01">What step 2 implements (2026-10-01)</h2>
+<ul>
+<li><code>src/analysis/injection-scan.ts</code>: <code>InjectionDetector</code> interface, a provider registry (<code>registerInjectionDetector</code>) that adapters and tests use, config resolution with floors, and <code>decideInjectionScanOutcome()</code>.</li>
+<li><code>after_tool_call</code> starts a scan for results of configured <code>sources</code> tools and parks the promise in <code>state.pendingInjectionScans</code>. The next <code>before_tool_call</code> of that session awaits it. Each scan bounds itself by <code>timeoutMs</code>. A scan that finishes after its session generation changed is discarded.</li>
+<li>Outcomes: <code>ignore</code>, <code>note</code> (reviewer note only) or <code>taint</code>. A taint lasts for the rest of the session (at most 5 remembered flags). It adds a fixed-label line to the full-review and browser context-check prompts (source tool, hostname, class labels; never the content or detector text). It also forces review of calls that would otherwise skip it, but only while a confirmed task exists. A taskless session keeps its existing gates, because there is nothing to review against.</li>
+<li>Uncertainty taints: timeout, detector error, an unregistered provider, an unknown class, a missing probability, and a benign class below <code>threshold</code>.</li>
+<li>Tests cover: default off; the hook-timing handoff (a mutation check confirmed the test fails without the await); content never reaching the reviewer; timeout; unregistered provider; benign content keeping the fast path; forced review; source filtering; the <code>llm_directed</code> floor.</li>
+</ul>
+<p>Narrower than the configuration sketch above, on purpose:</p>
+<ul>
+<li><code>avoid_page</code> / <code>avoid_domain</code> are not implemented. Accepted actions are <code>ignore</code>, <code>note</code> and <code>taint</code>.</li>
+<li><code>onTimeout</code> / <code>onError</code> are not configurable. They always taint.</li>
+<li>Forcing debate mode on a tainted session and a Telegram alert for <code>llm_directed</code> are not implemented. The flags are only logged (<code>injection_scan</code>, <code>injection_scan_error</code>, <code>injection_taint_forced_review</code>).</li>
+<li>The <code>sources</code> list is tool names. There is no email integration, so an email-reading tool would have to be added to it explicitly.</li>
+</ul>
+<p>Unverified against real OpenClaw: that <code>after_tool_call</code>&#39;s ctx carries <code>sessionKey</code> and its event carries <code>result</code>. Without them, no scan starts and the session behaves as if the feature were off. Check this in a real run before relying on the feature.</p>
 
-<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit d9b27d3. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
+<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit 9117b0b. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
 </main>
 </div>
 </body>
