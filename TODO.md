@@ -20,6 +20,20 @@ detector interface + taint state with a mock (step 2 **done** 2026-10-01,
 then Jev), then comparison. Also open: verify after_tool_call's ctx/event
 shape in a real OpenClaw run; avoid_page; forced debate/alert on taint.
 
+## Block categories — phase 2 not implemented
+
+Phase 1 is done (`src/policy/block-categories.ts`, `test/block-categories.test.ts`):
+every block carries a fixed, deterministic category line, and empty/unparseable
+reviewer output is `reviewer_malformed` (fails closed, not a security signal).
+Still open: a reviewer BLOCK is one category, `review_blocked` ("outside
+confirmed task or policy"). Phase 2 would add a third reviewer output line,
+`CATEGORY: OUTSIDE_TASK|POLICY|INJECTION|EXFILTRATION`, used for display only
+(never for authorization; missing/invalid → `review_blocked`). Touches the
+strict parsers in `verdict.ts`, `debate.ts` and `preflight.ts` plus four
+prompts in `index.ts` (read `docs/architecture/policy-precedence.md` first).
+Because a prompt change can shift verdicts, run `scripts/run-eval.mts` against
+the real reviewer before and after, and compare verdicts, not just categories.
+
 ## Debate-style triple-pass review — experimental implementation
 
 See `docs/architecture/debate-review.md`: optional FOR/AGAINST/JUDGE full review via `analysis.debateMode` (`off`, `always`, `clarify`, `hybrid`). Default off. Mocked integration tests cover enforcement; comparative real-model safety, cost and latency evaluation remains outstanding, along with provider usage accounting.
