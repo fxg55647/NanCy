@@ -214,6 +214,8 @@ node --experimental-strip-types scripts/run-eval.mts
 node --experimental-strip-types scripts/run-eval.mts --config=C:\path\to\openclaw.json
 ```
 
+The prompt-injection section (`scripts/injection-scenarios.json`: the agent reads attacker-influenced browser/`web_fetch`/email content, then takes the action it asked for) is part of the full run. `--only=injection` runs just that section, prints to the console, and leaves `EVAL-RESULTS.md` untouched. Scenarios with `"knownGap": true` are reported but do not fail the run. The harness serves each browser scenario's page to NanCy's own snapshot fetch by intercepting `127.0.0.1:<port>/snapshot`, so a real browser on the machine never affects verdicts.
+
 Re-run this after changing `analysis.model` or anything under `src/policy/`/`src/analysis/` to catch reviewer-behavior regressions — it's the fastest way to see, in one shot, whether the real model still reaches the same verdicts across every gate NanCy has. Edit `scripts/eval-scenarios.json` to add scenarios; each needs a `sessionMode` (`"none"`, `"main"`, or `"worker"`) and, for `"worker"`, a `taskId` (6–10 digits) plus a `task` description — see the comments at the top of `run-eval.mts` for how session keys and task confirmation are derived.
 
 ## Confirmed-task "record", for either tier

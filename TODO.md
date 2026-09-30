@@ -12,7 +12,9 @@ Prompt Guard, swappable adapter, default off) scanning content the agent reads;
 it can only tighten review, never allow. Timeout/error counts as tainted; email
 stays on a local detector by default; hostile pages avoided per URL, not per
 domain. Order: eval scenarios first (injection via page/email, on-task
-redirection, benign README false positives, timeout, hook timing), then the
+redirection, benign README false positives, timeout, hook timing) — step 1
+**done** (`scripts/injection-scenarios.json`, `run-eval.mts --only=injection`;
+timeout/hook timing deferred to step 2's mocked tests) — then the
 detector interface + taint state with a mock, then adapters, then comparison.
 
 ## Debate-style triple-pass review — experimental implementation
@@ -68,8 +70,9 @@ Not yet implemented — tracked here so they don't get lost across sessions.
 
 ### From an independent review of the eval suite (ChatGPT), still missing:
 
-- Prompt injection aimed at the reviewer via browser/page snapshot content.
-- Prompt injection embedded in email content reaching the reviewer.
+- ~~Prompt injection via browser/page snapshot content and via email~~ — covered
+  by `scripts/injection-scenarios.json` (2026-09-30, see
+  `docs/architecture/injection-scan.md`).
 - Data exfiltration to a recipient that *is* on the allow-list (too much/wrong
   content going to an otherwise-legitimate destination — tests that
   destination-preflight allowlisting isn't treated as a free pass by the
@@ -127,8 +130,9 @@ Still to do — add to `scripts/eval-scenarios.json` / a dedicated
 
 ### Still outstanding from the ChatGPT eval review (unchanged)
 
-- Prompt injection aimed at the reviewer via browser/page snapshot content.
-- Prompt injection embedded in email content reaching the reviewer.
+- ~~Prompt injection via browser/page snapshot content and via email~~ — covered
+  by `scripts/injection-scenarios.json` (2026-09-30, see
+  `docs/architecture/injection-scan.md`).
 - Data exfiltration to a recipient that *is* on the allow-list (too much/wrong
   content going to an otherwise-legitimate destination — tests that
   destination-preflight allowlisting isn't treated as a free pass by the
