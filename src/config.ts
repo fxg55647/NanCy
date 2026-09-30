@@ -73,6 +73,30 @@ export interface ArweaveAnchoringConfig {
   requirePreviousConfirmation?: boolean;
 }
 
+export interface InjectionScanConfig {
+  // Default false. See docs/architecture/injection-scan.md.
+  enabled?: boolean;
+  // Registered detector adapter name. An unknown provider taints every
+  // scanned result rather than silently scanning nothing. Default "none".
+  provider?: string;
+  // Tool names whose results are scanned. Default ["web_fetch", "browser"].
+  sources?: string[];
+  // Per-class action: "ignore" | "note" | "taint". llm_directed is never
+  // weaker than "taint".
+  actions?: {
+    marketing?: string;
+    deceptive_to_human?: string;
+    llm_directed?: string;
+    task_redirect?: string;
+  };
+  // Confidence/probability threshold, 0..1. Default 0.7.
+  threshold?: number;
+  // Per-scan time limit; a timeout taints. Default 800.
+  timeoutMs?: number;
+  // Content is cut to this length before any detector sees it. Default 8000.
+  maxChars?: number;
+}
+
 export interface NancyConfig {
   analysis?: AnalysisConfig;
   browser?: {
@@ -185,6 +209,9 @@ export interface NancyConfig {
   // locked task description once the human's reply is recognized as
   // filling it in — see src/confirmation/forms.ts. Default true.
   confirmationForms?: ConfirmationFormsConfig;
+  // Optional scan of content the agent reads, used only to tighten later
+  // review of the same session. Default off.
+  injectionScan?: InjectionScanConfig;
 }
 
 // Best-effort SecretInput resolution: config fields like telegram.botToken can be

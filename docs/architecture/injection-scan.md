@@ -1,6 +1,6 @@
 # Injection Scan (content taint signal)
 
-Status: **design proposal, not implemented**. Written down on 2026-09-30 after a design discussion about using TypeSafe AI's Jev model (a non-generative "System One" model returning typed values plus probabilities/confidence) as a fast prompt-injection check. This is the design record for a future feature toward README feature #4 (dedicated prompt-injection defense). Read it before implementing anything in `after_tool_call`, `src/state.ts` taint state, or a detector adapter.
+Status: **framework implemented (step 2), no real detector yet**. `src/analysis/injection-scan.ts` holds the detector interface, taint state and pending-scan handoff, tested with a mock detector (`test/injection-scan.test.ts`). No Jev or Prompt Guard adapter exists, so enabling it with any provider today taints every scanned result. Written down on 2026-09-30 after a design discussion about using TypeSafe AI's Jev model (a non-generative "System One" model returning typed values plus probabilities/confidence) as a fast prompt-injection check. This is the design record for a future feature toward README feature #4 (dedicated prompt-injection defense). Read it before implementing anything in `after_tool_call`, `src/state.ts` taint state, or a detector adapter.
 
 ## Problem
 
@@ -135,6 +135,24 @@ This is a single run, so it says nothing about verdict variance. Scenarios 6–7
 ## Implementation order
 
 1. ~~Eval scenarios above~~ — done: `scripts/injection-scenarios.json`, section in `run-eval.mts`.
-2. Detector interface + taint state in `src/state.ts` + pending-scan handoff, tested with a mock detector.
+2. ~~Detector interface + taint state + pending-scan handoff~~ — done, see "What step 2 implements" below.
 3. Adapters: local Prompt Guard first, then Jev once an early-access key exists.
 4. Comparison run and a decision on whether to recommend enabling it.
+
+## What step 2 implements (2026-10-01)
+
+- `src/analysis/injection-scan.ts`: `InjectionDetector` interface, a provider registry (`registerInjectionDetector`) that adapters and tests use, config resolution with floors, and `decideInjectionScanOutcome()`.
+- `after_tool_call` starts a scan for results of configured `sources` tools and parks the promise in `state.pendingInjectionScans`. The next `before_tool_call` of that session awaits it. Each scan bounds itself by `timeoutMs`. A scan that finishes after its session generation changed is discarded.
+- Outcomes: `ignore`, `note` (reviewer note only) or `taint`. A taint lasts for the rest of the session (at most 5 remembered flags). It adds a fixed-label line to the full-review and browser context-check prompts (source tool, hostname, class labels; never the content or detector text). It also forces review of calls that would otherwise skip it, but only while a confirmed task exists. A taskless session keeps its existing gates, because there is nothing to review against.
+- Uncertainty taints: timeout, detector error, an unregistered provider, an unknown class, a missing probability, and a benign class below `threshold`.
+- Tests cover: default off; the hook-timing handoff (a mutation check confirmed the test fails without the await); content never reaching the reviewer; timeout; unregistered provider; benign content keeping the fast path; forced review; source filtering; the `llm_directed` floor.
+
+Narrower than the configuration sketch above, on purpose:
+
+- `avoid_page` / `avoid_domain` are not implemented. Accepted actions are `ignore`, `note` and `taint`.
+- `onTimeout` / `onError` are not configurable. They always taint.
+- Forcing debate mode on a tainted session and a Telegram alert for `llm_directed` are not implemented. The flags are only logged (`injection_scan`, `injection_scan_error`, `injection_taint_forced_review`).
+- The `sources` list is tool names. There is no email integration, so an email-reading tool would have to be added to it explicitly.
+
+Unverified against real OpenClaw: that `after_tool_call`'s ctx carries `sessionKey` and its event carries `result`. Without them, no scan starts and the session behaves as if the feature were off. Check this in a real run before relying on the feature.
+

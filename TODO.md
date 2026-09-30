@@ -15,7 +15,10 @@ domain. Order: eval scenarios first (injection via page/email, on-task
 redirection, benign README false positives, timeout, hook timing) — step 1
 **done** (`scripts/injection-scenarios.json`, `run-eval.mts --only=injection`;
 timeout/hook timing deferred to step 2's mocked tests) — then the
-detector interface + taint state with a mock, then adapters, then comparison.
+detector interface + taint state with a mock (step 2 **done** 2026-10-01,
+`src/analysis/injection-scan.ts`), then adapters (local Prompt Guard first,
+then Jev), then comparison. Also open: verify after_tool_call's ctx/event
+shape in a real OpenClaw run; avoid_page; forced debate/alert on taint.
 
 ## Debate-style triple-pass review — experimental implementation
 

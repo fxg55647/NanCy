@@ -141,6 +141,30 @@
           }
         }
       },
+      "injectionScan": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Optional scan of content the agent reads (tool results) by a swappable detector. Its only effect is stricter review of the same session's later calls: a flagged result adds a note to the reviewer prompt and removes the no-review fast path while a confirmed task is active. Timeouts, detector errors, an unregistered provider and low confidence all count as tainted. Never allows anything by itself. Default off. See docs/architecture/injection-scan.md.",
+        "properties": {
+          "enabled": { "type": "boolean", "description": "Default false." },
+          "provider": { "type": "string", "description": "Registered detector adapter name. An unregistered provider taints every scanned result. Default \"none\"." },
+          "sources": { "type": "array", "items": { "type": "string" }, "description": "Tool names whose results are scanned. Default [\"web_fetch\", \"browser\"]." },
+          "actions": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Action per detector class: ignore, note (reviewer note only) or taint. llm_directed is never weaker than taint.",
+            "properties": {
+              "marketing": { "type": "string", "enum": ["ignore", "note", "taint"], "description": "Default ignore." },
+              "deceptive_to_human": { "type": "string", "enum": ["ignore", "note", "taint"], "description": "Default taint." },
+              "llm_directed": { "type": "string", "enum": ["taint"], "description": "Always taint." },
+              "task_redirect": { "type": "string", "enum": ["ignore", "note", "taint"], "description": "Content that tries to change the task's target, recipient, amount or scope. Default taint." }
+            }
+          },
+          "threshold": { "type": "number", "minimum": 0, "maximum": 1, "description": "Confidence/probability threshold. Default 0.7." },
+          "timeoutMs": { "type": "integer", "minimum": 1, "description": "Per-scan time limit; a timeout taints. Default 800." },
+          "maxChars": { "type": "integer", "minimum": 1, "description": "Content is cut to this length before any detector sees it. Default 8000." }
+        }
+      },
       "macroReview": {
         "type": "object",
         "additionalProperties": false,

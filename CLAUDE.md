@@ -22,6 +22,7 @@ Status: early-stage and "research and development only" per README's warning ban
 - `src/policy/tool-policy.ts` — main/cron default-deny allowlist, browser action classification, and `shouldAnalyze()`. Every `exec` call is reviewed; unknown browser actions and credential-bearing reads fail into review rather than bypassing it.
 - `src/policy/denial-policy.ts` — normalized denial classification, runtime-scoped total/burst counters, deterministic termination, and burst-review triggering.
 - `src/policy/block-categories.ts` — deterministic reasonCode → user-facing block category table and `formatBlockReason()` (fixed label line + detail). Every new `recordDenial` reasonCode must be added here; `test/block-categories.test.ts` scans `src/` and fails otherwise. Empty/unparseable reviewer output is `reviewer_malformed` (fails closed, `securitySignal: false`).
+- `src/analysis/injection-scan.ts` — optional, default-off scan of tool results by a swappable detector (registry: `registerInjectionDetector`). `after_tool_call` starts the scan and `before_tool_call` awaits it. The outcome can only taint the session (reviewer-prompt note + forced review while a task exists), never allow. No real adapter yet. See `docs/architecture/injection-scan.md`.
 - `src/confirmation/protocol.ts` — `parseConfirmationRequest()` / `isAffirmativeReply()` — intent confirmation flow (feature #2).
 - `src/confirmation/gap-detection.ts` — advisory-only LLM check flagging unspecified decision points in a proposed confirmation before the human sees it (feature #2's other half). See `docs/architecture/gap-detection.md`.
 - `src/confirmation/forms.ts` — NanCy-generated confirmation forms (v1: number/range/text/boolean fields only, purpose fixed by the model but kind/type always derived mechanically from a fixed lookup table) plus the response-mode menu, appended after the gap-detection note; independent `confirmationForms` on/off switch. See `docs/architecture/confirmation-forms.md`.
@@ -32,13 +33,13 @@ Status: early-stage and "research and development only" per README's warning ban
 - `src/logging/logger.ts` — `logDecision()`, log rotation.
 - `src/integrity/arweave-anchor.ts` — optional changed-only SHA-256 manifests for logs/control files, application-level Arweave chaining, confirmation checks, protected local state, and manifest verification.
 - `src/state.ts` — per-session state: bounded recent call/reasoning/denial ring buffers, cron-trigger correlation, call/denial counters, macro-review serialization, session-generation tokens, termination flags.
-- Config schema lives in `openclaw.plugin.json` (`analysis`, `browser`, `domains`, `arweaveAnchoring`, `macroReview`, `limits`, `mainSessionKey`, `mainSessionIdleMinutes`, `workerAgentId`, `telegramAlerts`, `testMode`).
+- Config schema lives in `openclaw.plugin.json` (`analysis`, `browser`, `domains`, `arweaveAnchoring`, `macroReview`, `limits`, `mainSessionKey`, `mainSessionIdleMinutes`, `workerAgentId`, `telegramAlerts`, `testMode`, `injectionScan`).
 
 ## Feature status (see README §"Key Technical Features" for full detail)
 
 ✅ implemented: SSIL one-shot analysis (#1), intent confirmation & gap detection (#2), Domain Border Control (#3), main/worker session split (#7, optional), behavioral review plus deterministic denial termination (#8), permanent operator policy (#9), write-protection for core files (#6), and optional Arweave integrity anchoring (#11).
 
-🧭 not implemented: Contextual Scrambler / dedicated prompt-injection defense (#4).
+🧭 not implemented: Contextual Scrambler / dedicated prompt-injection defense (#4). Its first building block, the default-off injection-scan framework (`src/analysis/injection-scan.ts`), exists but has no real detector adapter yet.
 
 ⚠️ lighter than described: DOM Biopsy (#5) — page-level snapshot only, not element-level HTML parsing.
 
@@ -78,7 +79,7 @@ Not part of the NanCy plugin itself — separate OpenClaw plugins/scripts used t
 - `docs/architecture/gather-results-format.md` — **implemented as a documented convention only, zero NanCy code**: the optional `[NANCY_RESULTS]{"items":[...]}[/NANCY_RESULTS]` block the target agent may use to report back candidates gathered via a `offersGatherFirst`-prompted narrower task, rendered by `tools/mobile-chat-poc/web/index.html` as a list/card toggle.
 - `docs/architecture/policy-precedence.md` — exactly which decision prompts explicitly name a standing-policy violation as its own BLOCK trigger (vs. relying on context alone), and which deliberately don't yet — read before editing any `Use BLOCK when...` sentence in `src/index.ts`
 - `docs/architecture/debate-review.md` — experimental optional FOR/AGAINST/JUDGE full review, implemented in `src/analysis/debate.ts`; `analysis.debateMode` defaults to off. Every mode fails closed on full-review errors, including outbound messages. Comparative real-model evaluation remains outstanding.
-- `docs/architecture/injection-scan.md` — **design only, not implemented**: optional swappable detector (Jev / local Prompt Guard) scanning content the agent reads and setting a taint flag that can only tighten the next review; classification, config floors, per-URL source avoidance, and the eval plan to run before any detector-specific code
+- `docs/architecture/injection-scan.md` — **framework implemented, no real detector adapter yet**: optional swappable detector (Jev / local Prompt Guard) scanning content the agent reads and setting a taint flag that can only tighten the next review; classification, config floors, per-URL source avoidance, and the eval plan to run before any detector-specific code
 - `docs/architecture/arweave-integrity-anchoring.md` — permanent hash-manifest source set, 15-minute changed-only cadence, chain/confirmation semantics, key handling, privacy limits, and verification
 - `docs/audits/2026-09-14-security-review.md` — repository-wide security review, reproduced findings, corrections, and verification evidence.
 - `docs/architecture/behavior-comparator.md` — the `tools/` dev instrumentation that runs a real OpenClaw agent with and without NanCy loaded and reports the difference; why `agent exec` was rejected for `agent --session-key`, why with/without-NanCy needs two isolated profiles, and the confirmation-dance/AGENTS.md dependency this depends on.

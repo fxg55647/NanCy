@@ -62,6 +62,12 @@ export function createSessionState() {
   // replies and info lookups are independent risk categories with their
   // own configured caps, so one grant never consumes the other's quota.
   const chatReplyWindowBySession = new Map<string, { windowStart: number; count: number }>();
+  // Injection scan (analysis/injection-scan.ts): scans started by
+  // after_tool_call and not yet awaited by the next before_tool_call, plus
+  // the bounded flags they left. A taint lasts for the rest of the session.
+  const pendingInjectionScans = new Map<string, Set<Promise<void>>>();
+  const injectionTaints = new Map<string, Array<{ source: string; labels: string[] }>>();
+  const injectionNotes = new Map<string, Array<{ source: string; labels: string[] }>>();
 
   function touchActivity(sessionKey: string): void {
     lastActivityMs.set(sessionKey, Date.now());
@@ -174,6 +180,9 @@ export function createSessionState() {
     sessionTriggerByKey.delete(key);
     infoLookupWindowBySession.delete(key);
     chatReplyWindowBySession.delete(key);
+    pendingInjectionScans.delete(key);
+    injectionTaints.delete(key);
+    injectionNotes.delete(key);
   }
 
   return {
@@ -187,6 +196,9 @@ export function createSessionState() {
     macroReviewInFlight,
     macroReviewPending,
     lastActivityMs,
+    pendingInjectionScans,
+    injectionTaints,
+    injectionNotes,
     touchActivity,
     getSessionToken,
     isSessionTokenCurrent,

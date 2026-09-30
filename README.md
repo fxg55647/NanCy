@@ -114,6 +114,8 @@ These measures reduce how often and how much untrusted content reaches the revie
 
 A dedicated prompt-injection defense for the reviewer is planned for a later release.
 
+**First building block: injection scan (framework only, off by default).** NanCy reviews what the agent *does*, not what it *reads*. A `web_fetch` result or an email never reaches the reviewer, so an injected instruction is caught only when the resulting action is clearly outside the confirmed task. The optional `injectionScan` setting lets a separate, swappable detector classify tool results the agent reads. A flagged result, or a detector timeout or error, marks the session as tainted. After that, the reviewer is told which earlier content was flagged (source and class labels only, never the content itself), and calls that would normally skip review are reviewed while a confirmed task exists. The scan can only tighten review, never allow anything. No real detector adapter (Jev, a local Prompt Guard class model) ships yet, so this is not yet usable protection. The [prompt-injection eval](./TESTING.md) shows the gap it targets: an invoice email that changes the supplier's bank account passes today, because the resulting transfer matches the task literally. See [injection scan](./docs/architecture/injection-scan.md).
+
 ### 5. DOM Biopsy ⚠️ (lighter than described)
 
 Before a browser-interact action (click, fill, submit, etc.), NanCy fetches a text snapshot of the current page and includes it as context in the same general intent-analysis prompt used for every tool call (see #1) — so the analysis model sees what the agent sees before deciding. This is not a dedicated, element-level parse of the underlying HTML to verify a specific element's true function; it's the same page-level context mechanism applied to browser actions.
@@ -284,6 +286,24 @@ Add a `domains` block next to `analysis` to allow/deny specific domains for `web
 ```
 
 `allow` and `deny` match subdomains automatically (`example.com` also matches `www.example.com`). If `allow` is set, everything not listed is blocked and `deny`/`reputationCheck`/`minAgeDays` are not consulted. `minAgeDays` is off by default (omit it, or set `0`) — turn it on only if you've accepted the false-positive risk against brand-new legitimate sites (see feature #3).
+
+#### Injection Scan (optional, off by default, no detector adapter yet)
+
+Scans tool results the agent reads with a registered detector and taints the session when content looks like injection or manipulation (see [feature #4](#4-contextual-scrambler-)):
+
+```json
+"injectionScan": {
+  "enabled": false,
+  "provider": "none",
+  "sources": ["web_fetch", "browser"],
+  "actions": { "marketing": "ignore", "deceptive_to_human": "taint", "llm_directed": "taint", "task_redirect": "taint" },
+  "threshold": 0.7,
+  "timeoutMs": 800,
+  "maxChars": 8000
+}
+```
+
+Actions are `ignore`, `note` (a note to the reviewer only) or `taint`. `llm_directed` is always `taint`. Timeouts, detector errors, low confidence and an unregistered `provider` always taint. No detector adapter ships yet, so enabling this today taints every scanned result. Leave it off until an adapter exists. The next call in the session waits up to `timeoutMs` for a pending scan. Content is cut to `maxChars` before any detector sees it. An external detector still receives that content, so keep private sources (such as email) out of `sources` unless the detector runs locally.
 
 #### Arweave Integrity Anchoring (optional, off by default)
 
