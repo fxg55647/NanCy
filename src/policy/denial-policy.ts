@@ -19,6 +19,9 @@ export interface DenialRecorderDeps {
   requestMacroReview: (sessionKey: string) => void;
 }
 
+// Per session, per gateway runtime. Alerts once when reached.
+export const REVIEWER_MALFORMED_ALERT_THRESHOLD = 5;
+
 function positiveInteger(value: number | undefined, fallback: number): number {
   return Number.isFinite(value) && value! > 0 ? Math.max(1, Math.round(value!)) : fallback;
 }
@@ -39,6 +42,17 @@ export function createDenialRecorder(deps: DenialRecorderDeps) {
         stopKind: "security_terminated",
       });
       return;
+    }
+
+    if (denial.reasonCode === "reviewer_malformed") {
+      const count = (state.reviewerMalformedCounts.get(sessionKey) ?? 0) + 1;
+      state.reviewerMalformedCounts.set(sessionKey, count);
+      if (count === REVIEWER_MALFORMED_ALERT_THRESHOLD) {
+        logDecision(logFile, denial.ts, "reviewer_malformed_threshold", denial.ids, { count });
+        if (notifier.alertsEnabled) {
+          notifier.sendAlert(`⚠️ *NanCy: reviewer returned ${count} empty/malformed responses*\nSession: \`${sessionKey}\`\nEach was blocked as "reviewer unavailable". Check the reviewer model — or whether reviewed content is breaking its output format.`);
+        }
+      }
     }
 
     // testMode deliberately turns every action into a dry-run denial. Even a

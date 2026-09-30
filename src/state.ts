@@ -35,6 +35,11 @@ export function createSessionState() {
   // classification made at each denial site in index.ts.
   const securityDenialsTotal = new Map<string, number>();
   const securityDenialsBurst = new Map<string, number>();
+  // Empty/unparseable reviewer responses. Not a security signal (they never
+  // feed the counters above), but a sustained run in one session may mean
+  // reviewed content is breaking the reviewer's output format, so the
+  // operator gets one alert when it crosses a threshold.
+  const reviewerMalformedCounts = new Map<string, number>();
   // Calls since the last macro-review for this session; reset to 0 each time
   // a review fires (see macroReviewThresholds below).
   const callCounters = new Map<string, number>();
@@ -162,6 +167,7 @@ export function createSessionState() {
     terminatedSessions.delete(key);
     securityDenialsTotal.delete(key);
     securityDenialsBurst.delete(key);
+    reviewerMalformedCounts.delete(key);
     macroReviewInFlight.delete(key);
     macroReviewPending.delete(key);
     lastActivityMs.delete(key);
@@ -175,6 +181,7 @@ export function createSessionState() {
     terminatedSessions,
     securityDenialsTotal,
     securityDenialsBurst,
+    reviewerMalformedCounts,
     callCounters,
     macroReviewThresholds,
     macroReviewInFlight,
