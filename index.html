@@ -55,7 +55,7 @@ footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border
 <div class="nav-body">
 <div class="brand">NanCy SSIL</div>
 <div class="brand-sub"><a href="https://github.com/fxg55647/NanCy">GitHub ↗</a></div>
-<div class="nav-group"><h2>Overview</h2><ul><li><a href="index.html" aria-current="page">NanCy SSIL</a></li><li><a href="claude.html">CLAUDE</a></li><li><a href="how-agents-go-wrong.html">HOW AGENTS GO WRONG</a></li><li><a href="incidents.html">INCIDENTS</a></li><li><a href="misconceptions.html">MISCONCEPTIONS</a></li><li><a href="nancy-policy.html">NANCY POLICY</a></li><li><a href="related-work.html">RELATED WORK</a></li><li><a href="security-philosophy.html">SECURITY PHILOSOPHY</a></li><li><a href="testing.html">TESTING</a></li></ul></div><div class="nav-group"><h2>Docs</h2><ul><li><a href="mobile-app-todo.html">Mobile App Todo</a></li></ul></div><div class="nav-group"><h2>Architecture</h2><ul><li><a href="architecture/arweave-integrity-anchoring.html">Arweave Integrity Anchoring</a></li><li><a href="architecture/behavior-comparator.html">Behavior Comparator</a></li><li><a href="architecture/confirmation-forms.html">Confirmation Forms</a></li><li><a href="architecture/debate-review.html">Debate Review</a></li><li><a href="architecture/denial-escalation-and-clarification.html">Denial Escalation And Clarification</a></li><li><a href="architecture/gap-detection.html">Gap Detection</a></li><li><a href="architecture/gather-results-format.html">Gather Results Format</a></li><li><a href="architecture/policy-precedence.html">Policy Precedence</a></li><li><a href="architecture/task-confirmation-menu.html">Task Confirmation Menu</a></li></ul></div><div class="nav-group"><h2>Audits</h2><ul><li><a href="audits/2026-09-14-security-review.html">2026 09 14 Security Review</a></li></ul></div>
+<div class="nav-group"><h2>Overview</h2><ul><li><a href="index.html" aria-current="page">NanCy SSIL</a></li><li><a href="claude.html">CLAUDE</a></li><li><a href="how-agents-go-wrong.html">HOW AGENTS GO WRONG</a></li><li><a href="incidents.html">INCIDENTS</a></li><li><a href="misconceptions.html">MISCONCEPTIONS</a></li><li><a href="nancy-policy.html">NANCY POLICY</a></li><li><a href="related-work.html">RELATED WORK</a></li><li><a href="security-philosophy.html">SECURITY PHILOSOPHY</a></li><li><a href="testing.html">TESTING</a></li></ul></div><div class="nav-group"><h2>Docs</h2><ul><li><a href="mobile-app-todo.html">Mobile App Todo</a></li></ul></div><div class="nav-group"><h2>Architecture</h2><ul><li><a href="architecture/arweave-integrity-anchoring.html">Arweave Integrity Anchoring</a></li><li><a href="architecture/behavior-comparator.html">Behavior Comparator</a></li><li><a href="architecture/confirmation-forms.html">Confirmation Forms</a></li><li><a href="architecture/debate-review.html">Debate Review</a></li><li><a href="architecture/denial-escalation-and-clarification.html">Denial Escalation And Clarification</a></li><li><a href="architecture/gap-detection.html">Gap Detection</a></li><li><a href="architecture/gather-results-format.html">Gather Results Format</a></li><li><a href="architecture/injection-scan.html">Injection Scan</a></li><li><a href="architecture/policy-precedence.html">Policy Precedence</a></li><li><a href="architecture/task-confirmation-menu.html">Task Confirmation Menu</a></li></ul></div><div class="nav-group"><h2>Audits</h2><ul><li><a href="audits/2026-09-14-security-review.html">2026 09 14 Security Review</a></li></ul></div>
 </div>
 </nav>
 <main>
@@ -166,6 +166,10 @@ footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border
 <tr>
 <td><strong>Review of behavior over time</strong></td>
 <td>In addition to per-action checks, NanCy periodically reviews recent calls for loops, gradual privilege escalation, repeated blocked attempts, and attempts to bypass supervision. Three counted security denials trigger an early review by default, while 20 terminate the session in trusted code even if the reviewer misses the pattern.</td>
+</tr>
+<tr>
+<td><strong>Categorized block reasons</strong></td>
+<td>Every block starts with a fixed, deterministic category line — e.g. <code>BLOCKED — no confirmed task</code>, <code>BLOCKED — destination not authorized</code>, <code>BLOCKED — standing policy violation</code>, <code>BLOCKED — clarification required</code>, or <code>BLOCKED — reviewer unavailable (not a security finding)</code> — followed by the specific reason. The same line appears in Telegram alerts. A reviewer outage or an empty/unparseable reviewer response still fails closed, but is never counted as a security denial toward burst review or termination; five in one session alert the operator instead. See <code>src/policy/block-categories.ts</code>.</td>
 </tr>
 <tr>
 <td><strong>Security audit trail and alerts</strong></td>
@@ -398,7 +402,7 @@ State the outcome you&#39;re being asked to accomplish, not a step-by-step plan 
 </code></pre>
 <p>Analysis results are written to <code>nancy-analysis.log</code> in the plugin directory.</p>
 
-<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit e968ee2. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
+<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit d9b27d3. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
 </main>
 </div>
 </body>

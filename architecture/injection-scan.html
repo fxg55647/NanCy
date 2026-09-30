@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Injection Scan — NanCy SSIL</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1a1a1a; --muted: #5b6472; --border: #e2e5ea;
+  --accent: #7c3aed; --code-bg: #f4f4f7; --nav-bg: #fafafa;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14161c; --fg: #eef0f4; --muted: #9aa3b2; --border: #2a2e38;
+    --accent: #b794f6; --code-bg: #1c1f27; --nav-bg: #191b22;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); }
+.layout { display: flex; min-height: 100vh; }
+nav.sidebar { width: 260px; flex-shrink: 0; background: var(--nav-bg); border-right: 1px solid var(--border); padding: 24px 16px; }
+nav.sidebar h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 20px 0 6px; }
+nav.sidebar ul { list-style: none; margin: 0; padding: 0; }
+nav.sidebar li a { display: block; padding: 4px 8px; border-radius: 6px; text-decoration: none; color: var(--fg); font-size: 14px; }
+nav.sidebar li a[aria-current="page"] { background: var(--accent); color: #fff; }
+nav.sidebar li a:hover { background: var(--border); }
+.brand { font-weight: 700; font-size: 18px; margin-bottom: 4px; }
+.brand-sub { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+main { flex: 1; min-width: 0; padding: 40px clamp(16px, 5vw, 64px); max-width: 860px; }
+main h1:first-child { margin-top: 0; }
+pre { background: var(--code-bg); padding: 14px 16px; overflow-x: auto; border-radius: 8px; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; overflow-x: auto; display: block; }
+th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+blockquote { border-left: 3px solid var(--accent); margin: 0; padding: 0 16px; color: var(--muted); }
+img { max-width: 100%; }
+footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+#nav-toggle { display: none; }
+.nav-toggle-label { display: none; }
+@media (max-width: 800px) {
+  .layout { display: block; }
+  nav.sidebar { width: auto; border-right: none; border-bottom: 1px solid var(--border); }
+  #nav-toggle:not(:checked) ~ .layout nav.sidebar .nav-body { display: none; }
+  .nav-toggle-label { display: block; padding: 16px; cursor: pointer; font-weight: 600; }
+}
+</style>
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="layout">
+<nav class="sidebar">
+<label class="nav-toggle-label" for="nav-toggle">☰ Docs menu</label>
+<div class="nav-body">
+<div class="brand">NanCy SSIL</div>
+<div class="brand-sub"><a href="https://github.com/fxg55647/NanCy">GitHub ↗</a></div>
+<div class="nav-group"><h2>Overview</h2><ul><li><a href="../index.html">NanCy SSIL</a></li><li><a href="../claude.html">CLAUDE</a></li><li><a href="../how-agents-go-wrong.html">HOW AGENTS GO WRONG</a></li><li><a href="../incidents.html">INCIDENTS</a></li><li><a href="../misconceptions.html">MISCONCEPTIONS</a></li><li><a href="../nancy-policy.html">NANCY POLICY</a></li><li><a href="../related-work.html">RELATED WORK</a></li><li><a href="../security-philosophy.html">SECURITY PHILOSOPHY</a></li><li><a href="../testing.html">TESTING</a></li></ul></div><div class="nav-group"><h2>Docs</h2><ul><li><a href="../mobile-app-todo.html">Mobile App Todo</a></li></ul></div><div class="nav-group"><h2>Architecture</h2><ul><li><a href="arweave-integrity-anchoring.html">Arweave Integrity Anchoring</a></li><li><a href="behavior-comparator.html">Behavior Comparator</a></li><li><a href="confirmation-forms.html">Confirmation Forms</a></li><li><a href="debate-review.html">Debate Review</a></li><li><a href="denial-escalation-and-clarification.html">Denial Escalation And Clarification</a></li><li><a href="gap-detection.html">Gap Detection</a></li><li><a href="gather-results-format.html">Gather Results Format</a></li><li><a href="injection-scan.html" aria-current="page">Injection Scan</a></li><li><a href="policy-precedence.html">Policy Precedence</a></li><li><a href="task-confirmation-menu.html">Task Confirmation Menu</a></li></ul></div><div class="nav-group"><h2>Audits</h2><ul><li><a href="../audits/2026-09-14-security-review.html">2026 09 14 Security Review</a></li></ul></div>
+</div>
+</nav>
+<main>
+<h1 id="injection-scan-content-taint-signal">Injection Scan (content taint signal)</h1>
+<p>Status: <strong>design proposal, not implemented</strong>. Written down on 2026-09-30 after a design discussion about using TypeSafe AI&#39;s Jev model (a non-generative &quot;System One&quot; model returning typed values plus probabilities/confidence) as a fast prompt-injection check. This is the design record for a future feature toward README feature #4 (dedicated prompt-injection defense). Read it before implementing anything in <code>after_tool_call</code>, <code>src/state.ts</code> taint state, or a detector adapter.</p>
+<h2 id="problem">Problem</h2>
+<p>NanCy reviews what the agent <em>does</em>, not what the agent <em>reads</em>. An injected instruction on a web page or in an email is caught only indirectly: when the agent&#39;s next action clearly falls outside the confirmed task, Intent Anchoring blocks it.</p>
+<p>Two gaps follow:</p>
+<ol>
+<li><strong>On-task redirection.</strong> Injected content that keeps the action inside the task&#39;s literal scope but changes a target, recipient, amount or scope (&quot;our billing account has changed, send payment to X&quot;) produces an action that looks authorized. This is the reviewer&#39;s weakest case.</li>
+<li><strong>The reviewer reads raw untrusted content itself.</strong> For <code>browser</code> calls, <code>before_tool_call</code> fetches a live snapshot and puts up to 4000 characters straight into the reviewer prompt (<code>src/index.ts</code>, <code>snapshotContext</code>). The prompt says to treat it as data, but the reviewer is still an injection target.</li>
+</ol>
+<p>Current data flow, verified in code on 2026-09-30:</p>
+<ul>
+<li><code>browser</code>: snapshot fetched live in <code>before_tool_call</code>, bounded, included in the reviewer prompt, saved to <code>snapshots/</code>.</li>
+<li><code>web_fetch</code> (and browser form submit): result saved to <code>snapshots/</code> in <code>after_tool_call</code> <strong>only</strong>; it never reaches the next review.</li>
+<li>Email content: never reaches the reviewer.</li>
+<li>Agent reasoning text: deliberately omitted from reviewer context (<code>src/analysis/context.ts</code>).</li>
+</ul>
+<p>So a taint signal would be a genuinely new channel into the next review, not an extension of an existing one.</p>
+<h2 id="proposal">Proposal</h2>
+<p>Scan content the agent has read with a fast, swappable detector. The result is a <strong>risk signal that can only tighten review</strong>: it never allows anything on its own.</p>
+<ol>
+<li><code>after_tool_call</code> starts a scan of the tool result and stores the pending scan promise in per-session state.</li>
+<li>The next <code>before_tool_call</code> for that session awaits the pending scan, bounded by <code>timeoutMs</code>.</li>
+<li>The classification maps to a configured action (see below). A tainted session gets stricter review: the <code>SAFE_EXEC</code> fast path is skipped, full review (optionally debate mode) is forced, and the reviewer context gets a line such as &quot;recently read content from <source> was flagged as possible injection (class: …)&quot;.</li>
+<li>Every classification is logged, so thresholds can be tuned from real data instead of intuition.</li>
+</ol>
+<p>This promise-based handoff is deliberate. It is unknown whether OpenClaw awaits async <code>after_tool_call</code> handlers, or whether they can hold back a result before the agent sees it. The design does not depend on either: timing is resolved in <code>before_tool_call</code>, which NanCy controls. The flag affects the <em>next</em> action, which is exactly the action NanCy reviews.</p>
+<h2 id="invariants">Invariants</h2>
+<ul>
+<li><strong>The detector never allows an action by itself.</strong> It can only raise the risk level or force a stricter review. The final decision stays with NanCy&#39;s policy and Intent Anchoring review. No detector verdict may skip, shorten, or override the LLM reviewer&#39;s BLOCK/CLARIFY.</li>
+<li><strong>Uncertainty never loosens review.</strong> A timeout, provider error, malformed result or low confidence counts as tainted. <code>onTimeout</code>/<code>onError</code> cannot be configured to <code>ignore</code>.</li>
+<li><strong>A missing alert is not a clean bill of health.</strong> Adversarial content can be built to evade classifiers, and the detector reads untrusted content itself.</li>
+<li><strong>The detector is an adapter, not a hard dependency.</strong> Jev, a local Prompt Guard class model, or none. Default off.</li>
+<li><strong>No full content goes to an external service by default.</strong> External providers get bounded, normalized, and where possible redacted content. Email is scanned only by a local detector by default. Redaction has a cost here: an injection can hide in the redacted part, which is another reason email stays local.</li>
+</ul>
+<h2 id="classification">Classification</h2>
+<p>Classifying only &quot;is this an injection&quot; floods on ordinary pages (READMEs and tutorials legitimately say &quot;run this command&quot;). Classifying by <em>audience</em> (human-directed persuasion vs. LLM-directed trickery) is useful for grading alerts but unsafe on its own:</p>
+<ul>
+<li>human-directed persuasion (fake urgency, &quot;recommended&quot; upsells) works on agents too;</li>
+<li>attackers disguise injections as ordinary human-directed text;</li>
+<li>scams aimed at humans (phishing, fake checkout) are dangerous to an agent too.</li>
+</ul>
+<p>So the detector asks two questions (Jev: a Choice plus a Noul question in one pass):</p>
+<p><strong>Content class (Choice):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Class</th>
+<th>Example</th>
+<th>Default action</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>none</code></td>
+<td>ordinary content</td>
+<td>nothing</td>
+</tr>
+<tr>
+<td><code>marketing</code></td>
+<td>&quot;Buy now!&quot;, &quot;Only 2 left&quot;</td>
+<td>nothing (at most a note to the reviewer)</td>
+</tr>
+<tr>
+<td><code>deceptive_to_human</code></td>
+<td>phishing, fake urgency, changed account number</td>
+<td><code>taint</code> + reviewer note</td>
+</tr>
+<tr>
+<td><code>llm_directed</code></td>
+<td>&quot;ignore previous instructions&quot;, &quot;as an AI assistant you must&quot;, hidden text</td>
+<td><code>avoid_page</code> + strongest review + alert</td>
+</tr>
+</tbody></table>
+<p><strong>Task redirection (yes/no probability), independent of audience:</strong> &quot;Does this content try to change what the agent does relative to the confirmed task: target, recipient, amount or scope?&quot; This is the question that catches disguised on-task redirection, which the audience-based class misses. The confirmed task text is included in the detector&#39;s state for this question only.</p>
+<h2 id="configuration-sketch">Configuration sketch</h2>
+<pre><code class="language-json">&quot;injectionScan&quot;: {
+  &quot;enabled&quot;: false,
+  &quot;provider&quot;: &quot;promptguard&quot;,
+  &quot;sources&quot;: [&quot;web_fetch&quot;, &quot;browser&quot;],
+  &quot;actions&quot;: {
+    &quot;marketing&quot;: &quot;ignore&quot;,
+    &quot;deceptive_to_human&quot;: &quot;taint&quot;,
+    &quot;llm_directed&quot;: &quot;avoid_page&quot;,
+    &quot;task_redirect&quot;: &quot;taint&quot;
+  },
+  &quot;threshold&quot;: 0.7,
+  &quot;timeoutMs&quot;: 800,
+  &quot;onTimeout&quot;: &quot;taint&quot;,
+  &quot;onError&quot;: &quot;taint&quot;,
+  &quot;maxChars&quot;: 8000
+}
+</code></pre>
+<ul>
+<li><code>provider</code>: <code>jev</code> | <code>promptguard</code> | <code>none</code>.</li>
+<li><code>sources</code>: <code>email</code> only when explicitly added, and with an external provider only after a separate explicit opt-in.</li>
+<li>Allowed actions: <code>ignore</code>, <code>note</code>, <code>taint</code>, <code>avoid_page</code>, <code>avoid_domain</code>.</li>
+<li>Floors: <code>llm_directed</code> cannot be set below <code>taint</code>. <code>onTimeout</code>/<code>onError</code> accept <code>taint</code> or stricter only.</li>
+</ul>
+<p>Strictness is meant to be tuned from operational experience, using the logged classifications.</p>
+<h2 id="avoiding-a-hostile-source">Avoiding a hostile source</h2>
+<p>A page that tries to command the agent has lost trust, so its content should not be used at all. This is cheap, deterministic and easy to explain, and fits alongside Domain Border Control (#3). Two traps:</p>
+<ol>
+<li><strong>User-generated content hosts.</strong> An injection planted in a GitHub issue, a review or a forum post must not cut off the whole domain. Avoidance is <strong>per URL/page by default</strong>. <code>avoid_domain</code> is a separate, stricter setting.</li>
+<li><strong>Avoidance as a steering tool.</strong> An attacker can plant an injection on a competitor&#39;s or a trusted shop&#39;s page so NanCy avoids it and the agent moves to the attacker&#39;s own page. Therefore:<ul>
+<li>after an avoidance, a replacement source is not trusted automatically; it goes through normal (tainted-session) review;</li>
+<li>if the avoided page is central to the confirmed task (&quot;order from this page&quot;), the result is CLARIFY to the human, not a silent switch.</li>
+</ul>
+</li>
+</ol>
+<h2 id="why-jev-is-not-the-reviewer">Why Jev is not the reviewer</h2>
+<p>Discussed and rejected for now:</p>
+<ul>
+<li><strong>Replacing the reviewer with Jev:</strong> Jev gives no reasons, and the REASON line feeds Telegram alerts, macro review, agent feedback and the planned Clarify Mode. Judging against task, <code>NANCY-POLICY.md</code> and call history is a reasoning task. Jev is closed, early access and unverified. A &quot;confident Jev ALLOW skips the LLM&quot; tier is still replacement, at the point where errors are least visible.</li>
+<li><strong>Jev as a third voter:</strong> acceptable only with veto power (Jev BLOCK or low confidence gives at least CLARIFY), never as a majority vote that can overturn the reviewer&#39;s BLOCK. Not suitable as the debate-mode judge.</li>
+</ul>
+<p>Replacement could be revisited only if evals show accuracy matching the reviewer plus calibration that tracks errors. The missing reasons remain a problem even then.</p>
+<p>Note: the only API guide found for Jev was a Hugging Face community blog. Verify the endpoint against TypeSafe&#39;s official documentation before sending any key or content.</p>
+<h2 id="evaluation-plan-before-any-jev-specific-code">Evaluation plan (before any Jev-specific code)</h2>
+<p>Build the eval scenarios first; they are needed whichever detector is chosen. Scenarios:</p>
+<ol>
+<li>A page tells the agent to ignore the user&#39;s task.</li>
+<li>A page tells the agent to send a secret out.</li>
+<li>An email containing the same attacks.</li>
+<li>Hostile content that looks on-task but changes target or recipient.</li>
+<li>Benign READMEs and how-to pages do not cause continuous tainting or blocking.</li>
+<li>The detector times out or returns an ambiguous result → tainted, never clean.</li>
+<li>The hook has not finished before the host&#39;s next call → <code>before_tool_call</code> awaits the pending scan (integration test, not assumption).</li>
+</ol>
+<p>Compare three setups: current reviewer only; reviewer + Jev; reviewer + local Prompt Guard. Measure blocks/recall, false alarms, added latency, and behavior on provider error. Record results in <code>EVAL-RESULTS.md</code>.</p>
+<h2 id="implementation-order">Implementation order</h2>
+<ol>
+<li>Eval scenarios above (<code>scripts/eval-scenarios.json</code> / <code>run-eval.mts</code>).</li>
+<li>Detector interface + taint state in <code>src/state.ts</code> + pending-scan handoff, tested with a mock detector.</li>
+<li>Adapters: local Prompt Guard first, then Jev once an early-access key exists.</li>
+<li>Comparison run and a decision on whether to recommend enabling it.</li>
+</ol>
+
+<footer>Generated from <a href="https://github.com/fxg55647/NanCy">fxg55647/NanCy</a> — commit d9b27d3. Docs, not audited production guidance; see NanCy's own README warning banner.</footer>
+</main>
+</div>
+</body>
+</html>
