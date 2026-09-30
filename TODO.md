@@ -5,6 +5,16 @@
 Katso [Nancy-mobiilisovelluksen TODO](docs/mobile-app-todo.md): kuvat, sanelu,
 paikallinen tekoäly, tehtävävahvistukset, työnkulut ja ehdotus ensimmäisen version rajaukseksi.
 
+## Injection scan (content taint signal) — design only
+
+See `docs/architecture/injection-scan.md`: optional fast detector (Jev or local
+Prompt Guard, swappable adapter, default off) scanning content the agent reads;
+it can only tighten review, never allow. Timeout/error counts as tainted; email
+stays on a local detector by default; hostile pages avoided per URL, not per
+domain. Order: eval scenarios first (injection via page/email, on-task
+redirection, benign README false positives, timeout, hook timing), then the
+detector interface + taint state with a mock, then adapters, then comparison.
+
 ## Debate-style triple-pass review — experimental implementation
 
 See `docs/architecture/debate-review.md`: optional FOR/AGAINST/JUDGE full review via `analysis.debateMode` (`off`, `always`, `clarify`, `hybrid`). Default off. Mocked integration tests cover enforcement; comparative real-model safety, cost and latency evaluation remains outstanding, along with provider usage accounting.
